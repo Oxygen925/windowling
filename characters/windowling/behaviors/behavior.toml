@@ -1,0 +1,8 @@
+# Windowling: 기본 FSM 만 사용 (Lua 없음). 느긋하게 걷고 창 위에 자주 앉는다
+walk_speed = 80.0
+foot_support_ratio = 0.5
+
+[activities]
+idle = { weight = 40, min = 3, max = 6 }
+walk = { weight = 45, min = 2, max = 6 }
+sit  = { weight = 15, min = 4, max = 8 }

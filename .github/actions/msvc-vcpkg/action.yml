@@ -1,0 +1,50 @@
+# CI·릴리스 공통: vcpkg 기준선 확인·부트스트랩, MSVC(vcvars64) 환경, 도구 확인.
+# vcpkg 체크아웃·바이너리 캐시는 호출하는 워크플로가 먼저 한다 (캐시 저장이 확실히 돌도록 워크플로 단계로 둔다).
+name: msvc-vcpkg
+description: vcpkg bootstrap + MSVC environment
+runs:
+  using: composite
+  steps:
+    - name: vcpkg 기준선 일치 확인
+      shell: pwsh
+      run: |
+        $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+        if ($baseline -ne $env:VCPKG_COMMIT) { throw "vcpkg.json builtin-baseline($baseline) 과 VCPKG_COMMIT($env:VCPKG_COMMIT) 이 다르다" }
+
+    - name: vcpkg 부트스트랩
+      shell: cmd
+      run: vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+    # vcvars64 환경을 다음 단계로 넘긴다. VS 내장 vcpkg 경로(VCPKG_ROOT 등)는 넘기지 않는다
+    # (서드파티 액션이 VCPKG_ROOT 를 VS 내장 vcpkg 로 덮어써 고정 커밋이 무시된 적이 있다)
+    - name: MSVC 개발 환경 (vcvars64)
+      shell: pwsh
+      run: |
+        $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products * `
+              -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        $bat = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+        function Read-Env($lines) {
+          $d = @{}
+          foreach ($l in $lines) { if ($l -match '^([^=]+)=(.*)$') { $d[$Matches[1]] = $Matches[2] } }
+          $d
+        }
+        $before = Read-Env (cmd /c set)
+        $after = Read-Env (cmd /c "`"$bat`" >nul && set")
+        $n = 0
+        foreach ($k in $after.Keys) {
+          if ($k -match '^(VCPKG_|GITHUB_|RUNNER_)') { continue }
+          if ($before.ContainsKey($k) -and $before[$k] -eq $after[$k]) { continue }
+          "$k=$($after[$k])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $n++
+        }
+        Write-Host "vcvars64: 변수 $n 개 반영"
+
+    - name: 도구 확인 (고정 vcpkg 사용 여부)
+      shell: pwsh
+      run: |
+        $want = Join-Path "$env:GITHUB_WORKSPACE" "vcpkg"
+        if ((Resolve-Path $env:VCPKG_ROOT).Path -ne (Resolve-Path $want).Path) { throw "VCPKG_ROOT 가 고정 체크아웃이 아님: $env:VCPKG_ROOT" }
+        & (Join-Path $env:VCPKG_ROOT "vcpkg.exe") version | Select-Object -First 1
+        cl 2>&1 | Select-Object -First 1
+        cmake --version | Select-Object -First 1
+        ninja --version

@@ -1,0 +1,26 @@
+# 3D 테스트 캐릭터 패키지 (P5, 개발용 — 일반 배포판에는 넣지 않는다)
+# 모델: Khronos glTF-Sample-Assets "Fox" (https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox)
+schema_version = 1
+id = "test-fox"
+name = "Test Fox"
+version = "1.0.0"
+renderers = ["gltf"]
+
+[license]
+name = "CC0-1.0 AND CC-BY-4.0"
+author = "Model: PixelMannen (CC0-1.0). Rigging and animation: tomkranis (CC-BY-4.0). glTF conversion: AsoboStudio, scurest (CC-BY-4.0)"
+source = "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox (LICENSE.md)"
+
+[model]
+path = "render/model/Fox.glb"
+base_height = 80
+yaw_deg = 60
+
+# 공통 행동 → glTF 애니메이션 (없는 행동은 idle 로 대체)
+[model.animations]
+idle = "Survey"
+look = "Survey"
+talk = "Survey"
+walk = "Walk"
+fall = "Run"
+drag = "Run"

@@ -1,0 +1,16 @@
+# 테스트 캐릭터 패키지 (P2, schema_version 1). 배포에 포함되는 테스트 에셋 (D3, CC0 D11)
+schema_version = 1
+id = "test-orange"
+name = "Test Orange"
+version = "1.0.0"
+renderers = ["sprite"]
+
+[license]
+name = "CC0-1.0"
+author = "Desktop Pet project"
+source = "tools/assets/gen_test_sprite.ps1"
+
+[sprite]
+atlas = "render/sprite/atlas.png"
+animations = "render/sprite/animations.toml"
+base_size = 128

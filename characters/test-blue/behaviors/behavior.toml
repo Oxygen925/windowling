@@ -1,0 +1,11 @@
+# 파랑: 더 빠르고 자주 걷는다. 행동 결정 일부를 Lua 로 재정의
+walk_speed = 110.0
+foot_support_ratio = 0.5
+
+[activities]
+idle = { weight = 25, min = 2, max = 4 }
+walk = { weight = 65, min = 3, max = 8 }
+sit  = { weight = 10, min = 4, max = 6 }
+
+[script]
+file = "behaviors/custom.lua"

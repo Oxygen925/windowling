@@ -1,0 +1,27 @@
+# 저장소 표준 (2026-10-14 결정): LF + UTF-8. PowerShell 은 UTF-8 BOM (Windows PowerShell 5.1 이 BOM 없으면 한글을 ANSI 로 읽음), BAT/CMD 는 CRLF.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cpp,h,hpp,hlsl,lua}]
+indent_style = space
+indent_size = 4
+
+[{CMakeLists.txt,*.cmake,*.json,*.toml,*.yml,*.yaml}]
+indent_style = space
+indent_size = 2
+
+[*.ps1]
+charset = utf-8-bom
+indent_style = space
+indent_size = 4
+
+[*.{bat,cmd}]
+end_of_line = crlf
+
+[*.md]
+trim_trailing_whitespace = false

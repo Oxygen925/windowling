@@ -1,0 +1,19 @@
+# 저장소 표준 (2026-10-14 결정): LF + UTF-8. PowerShell 은 LF + UTF-8 BOM(.editorconfig), BAT/CMD 는 CRLF.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 바이너리
+*.png binary
+*.glb binary
+*.jpg binary
+*.ico binary
+*.dds binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.pdb binary

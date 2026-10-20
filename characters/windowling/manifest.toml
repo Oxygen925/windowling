@@ -1,0 +1,17 @@
+# 예제 캐릭터 Windowling (schema_version 1). 앱 아이콘의 창 + 세로 눈에 다리를 단 마스코트.
+# 배포 zip 에는 넣지 않고 릴리스에 따로 올린다 (캐릭터 관리 창으로 설치)
+schema_version = 1
+id = "windowling"
+name = "Windowling"
+version = "1.0.0"
+renderers = ["sprite"]
+
+[license]
+name = "MIT"
+author = "Desktop Pet project"
+source = "tools/assets/gen_windowling_sprite.ps1"
+
+[sprite]
+atlas = "render/sprite/atlas.png"
+animations = "render/sprite/animations.toml"
+base_size = 128

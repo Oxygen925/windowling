@@ -1,0 +1,12 @@
+# 64x64 프레임 8개 가로 배열: 걷기 0~3, look 4, drag 5, sit 6, fall 7
+frame_width = 64
+frame_height = 64
+
+[animations]
+idle = { frames = [0], fps = 1 }
+walk = { frames = [0, 1, 2, 3], fps = 8 }
+sit  = { frames = [6], fps = 1 }
+fall = { frames = [7], fps = 1 }
+drag = { frames = [5], fps = 1 }
+look = { frames = [4], fps = 1 }
+talk = { frames = [4, 0], fps = 4 }  # 말하는 동안 (P3)

@@ -1,0 +1,13 @@
+# 128x128 프레임 11개 가로 배열 (tools/assets/gen_windowling_sprite.ps1)
+#   0 idle, 1 깜빡임, 2 걷기 기본, 3 왼발 듦, 4 오른발 듦, 5 sit, 6 fall, 7 drag, 8 look, 9~10 talk
+frame_width = 128
+frame_height = 128
+
+[animations]
+idle = { frames = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], fps = 5 }  # 약 3초마다 깜빡임
+walk = { frames = [2, 3, 2, 4], fps = 8 }
+sit  = { frames = [5], fps = 1 }
+fall = { frames = [6], fps = 1 }
+drag = { frames = [7], fps = 1 }
+look = { frames = [8], fps = 1 }
+talk = { frames = [9, 10, 9, 0], fps = 6 }  # 말하는 동안 (P3)

@@ -1,0 +1,109 @@
+# Windows x64 · MSVC · CMake(Ninja) · vcpkg 빌드와 단위 테스트 (2026-10-14 결정), 배포 빌드·패키징 확인 (P6-06)
+# 실제 데스크탑 시나리오, GPU 성능 측정, SIWC 실계정 검증은 로컬에서만 한다 (tests/scenario, tools/measure).
+# 액션은 커밋 SHA 로 고정한다 (주석의 태그는 참고용).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # vcpkg 고정: vcpkg.json 의 builtin-baseline 과 같은 커밋 (검사 단계가 일치를 확인)
+  VCPKG_COMMIT: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+  # 바이너리 캐시: files 제공자 + actions/cache (x-gha 제공자는 2025-04 에 제거됨, vcpkg-tool #1662)
+  VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-bincache,readwrite
+  VCPKG_DISABLE_METRICS: 1
+  # 캐시 형식·vcpkg 도구가 바뀌면 올린다 (키가 같으면 actions/cache 가 다시 저장하지 않아 오래된 캐시가 남는다)
+  VCPKG_CACHE_VERSION: 2
+
+jobs:
+  hygiene:
+    name: 줄 끝·인코딩 검사
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: LF·UTF-8·PowerShell BOM 검사
+        shell: pwsh
+        run: ./tools/ci/check_text.ps1
+
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: windows-2022  # 로컬과 같은 VS 2022(17.x) 계열
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: x64-debug
+            triplet: x64-windows-static-md
+          - preset: x64-release
+            triplet: x64-windows-static-md
+          - preset: x64-dist      # 배포 빌드: 정적 CRT, 시험 훅·개발 도구 없음
+            triplet: x64-windows-static
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: vcpkg 체크아웃 (고정 커밋)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_COMMIT }}
+          path: vcpkg
+
+      - name: vcpkg 바이너리 캐시 복원
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: vcpkg-bincache
+          key: vcpkg-v${{ env.VCPKG_CACHE_VERSION }}-${{ matrix.triplet }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-v${{ env.VCPKG_CACHE_VERSION }}-${{ matrix.triplet }}-${{ env.VCPKG_COMMIT }}-
+
+      - uses: ./.github/actions/msvc-vcpkg
+
+      - name: 구성
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: 빌드
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: 단위 테스트
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      - name: 배포 빌드 확인 (CRT DLL 가져오기 없음·DLL 로드 플래그)
+        if: matrix.preset == 'x64-dist'
+        shell: pwsh
+        run: |
+          $deps = dumpbin /nologo /dependents build/x64-dist/desktop-pet.exe | Out-String
+          if ($deps -match '(?i)vcruntime|msvcp') { throw "배포 빌드가 VC++ 런타임 DLL 을 가져옴" }
+          $lc = dumpbin /nologo /loadconfig build/x64-dist/desktop-pet.exe | Out-String
+          if ($lc -notmatch '0800 Dependent Load Flag') { throw "DEPENDENTLOADFLAG 0x800 없음" }
+
+      - name: 패키징 확인
+        if: matrix.preset == 'x64-dist'
+        shell: pwsh
+        run: ./tools/release/package.ps1
+
+      - name: 패키지 올리기 (확인용, 7일)
+        if: matrix.preset == 'x64-dist'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+      - name: vcpkg 빌드 로그 (실패 시)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: vcpkg-logs-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}/vcpkg-manifest-install.log
+            vcpkg/buildtrees/**/*.log
+          if-no-files-found: ignore

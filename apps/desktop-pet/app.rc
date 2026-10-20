@@ -1,0 +1,35 @@
+// 앱 리소스. 아이콘은 tools/assets/gen_app_icon.ps1 로 만든다 (디자인 원본 tools/assets/app_icon.svg)
+#include <winver.h>
+#include "dp_version.h"
+
+1 ICON "app.ico"
+
+// 실행 파일 버전 정보 (P6: 탐색기 속성·SmartScreen·지원 문의에서 버전 확인)
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION DP_VERSION_MAJOR, DP_VERSION_MINOR, DP_VERSION_PATCH, 0
+PRODUCTVERSION DP_VERSION_MAJOR, DP_VERSION_MINOR, DP_VERSION_PATCH, 0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Desktop Pet project"
+            VALUE "FileDescription", "Desktop Pet"
+            VALUE "FileVersion", DP_VERSION_STRING
+            VALUE "InternalName", "desktop-pet"
+            VALUE "LegalCopyright", "MIT License"
+            VALUE "OriginalFilename", "desktop-pet.exe"
+            VALUE "ProductName", "Desktop Pet"
+            VALUE "ProductVersion", DP_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

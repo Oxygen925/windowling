@@ -1,0 +1,90 @@
+# 태그 v<버전> → 배포 빌드·단위 테스트·패키지 → GitHub 릴리스 **초안** (P6-06).
+# 공개는 사용자가 초안을 확인한 뒤 직접 한다 (2026-10-20 결정). 태그 버전과 CMake project(VERSION) 가 다르면 실패.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VCPKG_COMMIT: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+  VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-bincache,readwrite
+  VCPKG_DISABLE_METRICS: 1
+  VCPKG_CACHE_VERSION: 2
+
+jobs:
+  release:
+    name: 릴리스 초안
+    runs-on: windows-2022
+    permissions:
+      contents: write  # 이 작업만: 릴리스 초안 만들기
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: vcpkg 체크아웃 (고정 커밋)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_COMMIT }}
+          path: vcpkg
+
+      - name: vcpkg 바이너리 캐시 복원
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6 (릴리스는 복원만, 캐시 저장은 CI 가 한다)
+        with:
+          path: vcpkg-bincache
+          key: vcpkg-v${{ env.VCPKG_CACHE_VERSION }}-x64-windows-static-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-v${{ env.VCPKG_CACHE_VERSION }}-x64-windows-static-${{ env.VCPKG_COMMIT }}-
+
+      - uses: ./.github/actions/msvc-vcpkg
+
+      - name: 구성 (업데이트 확인 저장소 = 이 저장소)
+        run: cmake --preset x64-dist "-DDP_RELEASE_REPO=${{ github.repository }}"
+
+      - name: 빌드
+        run: cmake --build --preset x64-dist
+
+      - name: 단위 테스트
+        run: ctest --preset x64-dist --output-on-failure
+
+      - name: 태그와 버전 확인
+        shell: pwsh
+        run: |
+          $m = Select-String -Path build/x64-dist/generated/dp_version.h -Pattern '#define DP_VERSION_STRING "([0-9.]+)"'
+          $v = $m.Matches[0].Groups[1].Value
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "태그(${{ github.ref_name }}) 와 버전(v$v) 이 다르다" }
+          "VERSION=$v" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: 패키지
+        shell: pwsh
+        run: ./tools/release/package.ps1 -Repo "${{ github.repository }}"
+
+      - name: 릴리스 초안 만들기
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $sha = (Get-Content "dist/DesktopPet-$env:VERSION-win-x64.zip.sha256" -Raw).Trim()
+          $notes = @"
+          Desktop Pet $env:VERSION
+
+          - 설치·삭제·개인정보: README.md / README.en.md
+          - 실행 파일에 코드 서명이 없습니다 — SmartScreen 경고는 README 안내를 보세요. Not code-signed; see the README about SmartScreen.
+          - 캐릭터는 동봉하지 않습니다. 예제 캐릭터: DesktopPet-character-*.zip (캐릭터 관리 창에 끌어다 놓기)
+
+          SHA-256:
+          ``````
+          $sha
+          ``````
+          "@
+          $notesFile = Join-Path $env:RUNNER_TEMP "notes.md"
+          [IO.File]::WriteAllText($notesFile, ($notes -replace '(?m)^          ', ''))
+          gh release create "${{ github.ref_name }}" dist/* --draft --verify-tag --title "Desktop Pet $env:VERSION" --notes-file $notesFile

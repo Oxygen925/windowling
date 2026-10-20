@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100">
+  <!-- Desktop Pet 앱 아이콘 (32px 이상 디자인). AI(ChatGPT) 생성 SVG 를 바탕으로 프로젝트에서 고침. MIT. 작은 크기는 tools/assets/gen_app_icon.ps1 이 따로 그린다 -->
+  <rect x="0" y="0" width="100" height="100" rx="22" fill="#262C36"/>
+  <rect x="1" y="1" width="98" height="98" rx="21" fill="none" stroke="#3C4554" stroke-width="2"/>
+  <path d="M16 40V16H52" fill="none" stroke="#86DACA" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48 84H84V60" fill="none" stroke="#86DACA" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="28" y="30" width="44" height="42" rx="5" fill="none" stroke="#E9EEF2" stroke-width="7" stroke-linejoin="round"/>
+  <rect x="37" y="43.5" width="8" height="17" rx="4" fill="#E9EEF2"/>
+  <rect x="55" y="43.5" width="8" height="17" rx="4" fill="#E9EEF2"/>
+</svg>

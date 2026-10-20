@@ -1,0 +1,8 @@
+# 주황: 기본 FSM 만 사용 (Lua 없음)
+walk_speed = 70.0
+foot_support_ratio = 0.5
+
+[activities]
+idle = { weight = 45, min = 3, max = 7 }
+walk = { weight = 40, min = 2, max = 6 }
+sit  = { weight = 15, min = 5, max = 10 }

@@ -1,0 +1,6 @@
+이 디렉터리(assets/test/)의 테스트 에셋은 CC0 1.0 Universal (Public Domain Dedication)로 배포한다.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The test assets in this directory (assets/test/) are dedicated to the public domain under CC0 1.0 Universal.
+
+- pet_sheet.png : tools/assets/gen_test_sprite.ps1 로 생성 (64x64 프레임 8개: walk 0~3, look 4, drag 5, sit 6, fall 7)

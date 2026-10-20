@@ -1,0 +1,9 @@
+#pragma once
+// 생성 파일 (CMake configure_file). 버전은 CMakeLists.txt 의 project(VERSION) 한 곳에서 정한다
+#define DP_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define DP_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define DP_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define DP_VERSION_STRING "@PROJECT_VERSION@"
+#define DP_VERSION_WSTRING L"@PROJECT_VERSION@"
+// 업데이트 확인 저장소 (빈 문자열 = 확인 안 함)
+#define DP_RELEASE_REPO "@DP_RELEASE_REPO@"
