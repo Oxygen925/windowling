@@ -29,6 +29,7 @@ struct ObserveJob {
     size_t maxSpeechChars = 120;
     std::vector<std::string> behaviors;
     StreamTimeouts timeouts;
+    std::string reasoningEffort;  // "" = 보내지 않음
 };
 
 struct AiEvent {
@@ -46,6 +47,7 @@ struct AiEvent {
     bool captured = false;
     std::string captureError;
     bool structuredRejected = false, imageRejected = false;
+    bool effortRejected = false;  // 모델이 reasoning.effort 를 거부해 빼고 다시 보냄
 };
 
 class AiService {

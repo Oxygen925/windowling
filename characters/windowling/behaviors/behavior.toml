@@ -1,8 +1,17 @@
-# Windowling: 기본 FSM 만 사용 (Lua 없음). 느긋하게 걷고 창 위에 자주 앉는다
+# Windowling: 기본 FSM 만 사용 (Lua 없음). 느긋하게 걷고 창 위에 자주 앉는다.
+# 선택 행동: 점프·벽 타기, 펫끼리 인사·잡기 놀이·하이파이브·부딪치기·붙어 앉기·기차놀이 (ADR-13 추가 항목)
 walk_speed = 80.0
 foot_support_ratio = 0.5
+rest_between = 1.0   # 행동 사이 1초 쉼
+greet = true         # 다른 펫과 마주치면 인사 (하이파이브, 펫끼리 AI 대화 설정이 켜져 있으면 한마디)
+bump = true          # 걸어가다 부딪치면 둘 다 뒤로 폴짝
+lean = true          # 둘이 앉아 있으면 옆에 붙어 앉기
 
 [activities]
-idle = { weight = 40, min = 3, max = 6 }
-walk = { weight = 45, min = 2, max = 6 }
-sit  = { weight = 15, min = 4, max = 8 }
+idle   = { weight = 30, min = 3, max = 6 }
+walk   = { weight = 38, min = 2, max = 6 }
+sit    = { weight = 12, min = 4, max = 8 }
+jump   = { weight = 8, min = 1, max = 1 }
+climb  = { weight = 5, min = 1, max = 1 }
+follow = { weight = 4, min = 1, max = 1 }   # 잡기 놀이
+train  = { weight = 3, min = 1, max = 1 }   # 기차놀이

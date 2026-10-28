@@ -41,7 +41,7 @@ $mock = Start-Process $mockExe -ArgumentList @("--port-file=$portFile") -PassThr
 for ($i = 0; $i -lt 100 -and -not (Test-Path $portFile); $i++) { Start-Sleep -Milliseconds 100 }
 $base = "http://127.0.0.1:" + (Get-Content $portFile).Trim()
 $urlFile = Join-Path $tmp "url.txt"
-function Chat { [PA.N]::FindWindowW("DesktopPet.Chat", [IntPtr]::Zero) }
+function Chat { [PA.N]::FindWindowW("DesktopPetDev.Chat", [IntPtr]::Zero) }
 function ChatClick($id) { $c = Chat; [void][PA.N]::PostMessageW($c, 0x111, [IntPtr]$id, [PA.N]::GetDlgItem($c, $id)) }
 
 $scenarios = @(
@@ -67,7 +67,7 @@ foreach ($run in 1..$Runs) {
         if ($s.Ai) {
             # 안정화 구간(10초) 안에 로그인을 끝낸다
             Start-Sleep -Seconds 2
-            [void][PA.N]::PostMessageW([PA.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero), 0x111, [IntPtr]110, [IntPtr]::Zero)
+            [void][PA.N]::PostMessageW([PA.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero), 0x111, [IntPtr]110, [IntPtr]::Zero)
             for ($i = 0; $i -lt 30 -and (Chat) -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 100 }
             Remove-Item $urlFile -ErrorAction SilentlyContinue
             ChatClick 211  # Continue with ChatGPT (회차마다 auth 폴더를 지워 로그아웃 상태에서 시작)

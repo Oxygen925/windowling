@@ -24,6 +24,7 @@ A desktop pet for Windows that walks around the desktop and on top of your windo
 ## First run
 
 - The release does not include characters. Download the sample character **Windowling** from the release (`DesktopPet-character-windowling-*.zip`) and drop it on the **Characters…** window (tray menu); it is checked, installed and shown right away. You can also choose which characters and how many pets to show there.
+- Pets interact with each other (greeting, tag and more) when two or more are shown.
 - The app lives in the notification area (tray). A welcome window explains the basics the first time (open it again with **Help** in the tray menu).
 
 ## Controls
@@ -39,6 +40,8 @@ Change settings in **Settings…** (language, theme, pet size, AI, screen watchi
 
 ## AI chat (optional)
 
+- Choose the default model and reasoning effort in Settings → AI. Pet chat has its own effort (low by default). If a model does not accept the effort, the request is sent again without it.
+
 - Turn it on with **AI chat → Use AI chat (Sign in with ChatGPT)** in the tray menu, then sign in with **Continue with ChatGPT** in the chat window. Finish the OpenAI sign-in and consent in your browser and you return to the app.
 - Chats use **your ChatGPT plan's usage** (the app itself has no charges). Check usage with **Manage usage** in the chat window.
 - Sign-in data (tokens) is stored on this PC encrypted with Windows DPAPI. Chat text is kept in memory only, never written to disk or logs.
@@ -46,7 +49,7 @@ Change settings in **Settings…** (language, theme, pet size, AI, screen watchi
 ## Screen watching (optional)
 
 - When you turn it on with **Screen watching → Turn on screen watching…**, a consent window shows what is sent; it turns on only after you tick the box.
-- While on, now and then (by default every 15–30 minutes, at most twice an hour) one downscaled image of the monitor the pet is on is sent to OpenAI through your signed-in ChatGPT account to get a short remark. Images and raw responses are not stored.
+- While on, now and then (by default every 15–30 minutes, at most twice an hour; in Settings the interval can go down to 1 minute and a limit of 0 means no limit) one downscaled image of the monitor the pet is on is sent to OpenAI through your signed-in ChatGPT account to get a short remark. Images and raw responses are not stored.
 - It does not look while the screen is locked, in full screen, while you are away, while chatting, or when an **excluded app** (password managers, messengers, …, matched by executable name) is visible on that monitor. Note that web messengers or password extensions inside a browser cannot be excluded by executable name.
 - Turn it off or pause it at any time (a pause survives restarts). If you widen its scope in the settings after consenting (frequency, image size, excluded apps, …), it turns off and asks for consent again.
 
@@ -67,9 +70,10 @@ Installation checks zip paths, links, sizes and scripts (Lua sandbox). Avoid ins
 ## Data and privacy
 
 - Data location: `%LOCALAPPDATA%\DesktopPet` (settings, characters, logs, sign-in data, state files). Logs older than 14 days are deleted.
+  - Development builds from source (`x64-debug`, `x64-release`) use a separate `%LOCALAPPDATA%\DesktopPet-Dev` ([dev/release separation](docs/release_process_ko.md), Korean).
 - What the app sends over the network:
   - When you use AI chat: the conversation → OpenAI (Sign in with ChatGPT).
-  - When screen watching is on: what is described above → OpenAI.
+  - When **Pets chat with each other using AI when they meet** is on in the settings (off by default, every 10 minutes at most by default): both characters' names and personas and the other pet's line → OpenAI. Not while you chat, screen watching runs or the chat window is open; not kept in the chat history and not read aloud.
   - Update check (on by default, once a day): a request for `latest.json` on GitHub releases (GitHub sees your IP address and the app version). Turn off **Check for new versions** in the settings to stop it. The app only tells you about a new version; you download it yourself from the release page.
   - Nothing else — no usage statistics or telemetry.
 - Local TTS connects only to an engine on this PC (127.0.0.1).

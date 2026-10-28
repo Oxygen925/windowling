@@ -16,6 +16,11 @@ const std::vector<std::string>& CommonActions() {
     return v;
 }
 
+const std::vector<std::string>& OptionalActions() {
+    static const std::vector<std::string> v = {"jump", "climb", "rest", "highfive", "lean", "peek", "ride", "bug"};
+    return v;
+}
+
 std::optional<fs::path> ResolveInside(const fs::path& root, const std::string& relative) {
     if (relative.empty()) return std::nullopt;
     const fs::path rel(std::u8string(relative.begin(), relative.end()));  // UTF-8 (TOML 문자열)
@@ -110,7 +115,8 @@ void ParseAnimations(const toml::table& t, const PackageLimits& lim, SpriteDef& 
             warnings.push_back("animations." + n + ": fps 범위 밖 → 8");
             clip.fps = 8;
         }
-        if (std::find(CommonActions().begin(), CommonActions().end(), n) == CommonActions().end())
+        if (std::find(CommonActions().begin(), CommonActions().end(), n) == CommonActions().end() &&
+            std::find(OptionalActions().begin(), OptionalActions().end(), n) == OptionalActions().end())
             warnings.push_back("animations." + n + ": 공통 행동이 아님 (사용되지 않음)");
         sprite.clips[n] = std::move(clip);
     }
@@ -129,12 +135,36 @@ void ParseBehavior(const toml::table& t, const fs::path& root, const PackageLimi
         warnings.push_back("behavior.foot_support_ratio 범위 밖 → 0.5");
         b.footSupportRatio = 0.5;
     }
-    b.climb = t["climb"].value_or(false);
-    if (b.climb) warnings.push_back("behavior.climb 은 P2에서 미구현 (무시)");
+    if (t.contains("climb")) warnings.push_back("behavior.climb 은 쓰지 않음 — [activities] climb 비중으로 켠다 (무시)");
+    b.jumpHeight = t["jump_height"].value_or(b.jumpHeight);
+    if (!(b.jumpHeight >= 0.5 && b.jumpHeight <= 6.0)) {
+        warnings.push_back("behavior.jump_height 범위 밖(0.5~6) → 2.5");
+        b.jumpHeight = 2.5;
+    }
+    b.restBetween = t["rest_between"].value_or(b.restBetween);
+    if (!(b.restBetween >= 0 && b.restBetween <= 5)) {
+        warnings.push_back("behavior.rest_between 범위 밖(0~5) → 0");
+        b.restBetween = 0;
+    }
+    b.greet = t["greet"].value_or(false);
+    b.bump = t["bump"].value_or(false);
+    b.lean = t["lean"].value_or(false);
+    b.bugHunt = t["bug_hunt"].value_or(false);
+    b.headHeight = t["head_height"].value_or(b.headHeight);
+    if (!(b.headHeight >= 0.1 && b.headHeight <= 1.0)) {
+        warnings.push_back("behavior.head_height 범위 밖(0.1~1) → 0.8");
+        b.headHeight = 0.8;
+    }
+    b.climbSpeed = t["climb_speed"].value_or(b.climbSpeed);
+    if (!(b.climbSpeed == 0 || (b.climbSpeed >= 10 && b.climbSpeed <= 1000))) {
+        warnings.push_back("behavior.climb_speed 범위 밖(10~1000) → 기본값");
+        b.climbSpeed = 0;
+    }
     if (const toml::table* acts = t["activities"].as_table()) {
         for (const auto& [name, node] : *acts) {
             const std::string n(name.str());
-            if (n != "idle" && n != "walk" && n != "sit") {
+            if (n != "idle" && n != "walk" && n != "sit" && n != "jump" && n != "climb" && n != "follow" && n != "train" &&
+                n != "visit" && n != "race" && n != "stack") {
                 warnings.push_back("behavior.activities." + n + ": 알 수 없는 행동 (무시)");
                 continue;
             }
@@ -303,6 +333,11 @@ void FinishPackage(CharacterPackage pkg, const PackageLimits& lim, PackageLoadRe
                 pkg.behavior.activities = {{"idle", {45, 3, 7}}, {"walk", {40, 2, 6}}, {"sit", {15, 5, 10}}};
             }
         }
+    }
+    // 벽 타기는 climb 애니메이션이 있는 캐릭터만 (벽에 붙은 모습이 없으면 어색하다)
+    if (pkg.behavior.activities.contains("climb") && !pkg.HasClip("climb")) {
+        r.warnings.push_back("behavior.activities.climb: climb 애니메이션이 없어 벽 타기를 끔");
+        pkg.behavior.activities.erase("climb");
     }
     // persona.md 는 선택 (P3, 기준선 §6.1). 대화 성격만 정하고 권한에는 영향 없음. 문제가 있어도 경고 후 무시
     const fs::path personaPath = pkg.root / "persona.md";

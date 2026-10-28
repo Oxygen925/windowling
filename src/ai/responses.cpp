@@ -1,4 +1,6 @@
 #include "ai/responses.h"
+
+#include "core/reasoning_effort.h"
 #include "ai/json_util.h"
 
 #include <algorithm>
@@ -137,6 +139,7 @@ std::string BuildResponsesRequest(const AiRequest& r) {
     }
     json body = {{"model", r.model}, {"input", input}, {"store", false}, {"stream", true}};
     if (!r.instructions.empty()) body["instructions"] = Utf8Sanitize(r.instructions);
+    if (!r.reasoningEffort.empty() && core::IsReasoningEffort(r.reasoningEffort)) body["reasoning"] = {{"effort", r.reasoningEffort}};
     if (!r.jsonSchema.empty()) {
         json schema = json::parse(r.jsonSchema, nullptr, false);
         if (!schema.is_discarded())

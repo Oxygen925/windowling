@@ -11,6 +11,7 @@
 #include "platform/windows/strings.h"
 #include "ui/text.h"
 #include "ui/ui_common.h"
+#include "dp_version.h"
 
 namespace dp {
 
@@ -53,7 +54,7 @@ void CharactersWindow::Show(CharactersCallbacks callbacks) {
         BringToFront();
         return;
     }
-    Open({L"DesktopPet.Characters", ui::T("characters.title"), 780, 560, 660, 480});
+    Open({DP_CLASS_PREFIX L"Characters", ui::T("characters.title"), 780, 560, 660, 480});
 }
 
 void CharactersWindow::OnCreate() {

@@ -32,6 +32,15 @@ std::vector<IntervalI> TopExposure(const WorldSnapshot& world, size_t index) {
     return SubtractIntervals({w.left, w.right}, std::move(cuts));
 }
 
+std::vector<IntervalI> SideExposure(const WorldSnapshot& world, size_t index, int32_t x, IntervalI ys) {
+    std::vector<IntervalI> cuts;
+    for (size_t i = 0; i < index && i < world.windows.size(); ++i) {
+        const RectI& o = world.windows[i].bounds;
+        if (o.left <= x && x < o.right) cuts.push_back({o.top, o.bottom});
+    }
+    return SubtractIntervals(ys, std::move(cuts));
+}
+
 namespace {
 
 // 모니터 작업 영역 중 x 범위가 겹치고 y 가 들어가는 영역 (창 상단 위 공간 판정용)

@@ -1,14 +1,11 @@
 ﻿# P5 3D 시나리오 (P5 계획 §4): 3D 펫(test-fox)의 착지·행동→애니메이션·클릭 판정(Region)·GPU 재생성, 코어 불변.
 # 화면 캡처는 하지 않는다. 펫이 그린 픽셀만 --render-dump 로 받아 클릭할 점(불투명·투명)을 고른다.
 # 실행 중 테스트 창 2개가 뜨고 마우스가 움직이며 클릭한다. PC 를 만지지 않는다.
-param([string]$Preset = "x64-release", [string]$BaseCommit = "57bceb8")
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_LANGUAGE = "ko"; $env:DP_TEST_NO_WELCOME = "1"  # 시나리오: 화면 문구 한국어 고정, 환영 창 끔
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$pet = Join-Path $root "build\$Preset\desktop-pet.exe"
-$outDir = Join-Path $root ("logs\p5\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
+param([string]$Preset = "x64-release", [string]$BaseCommit = "57bceb8", [string]$EndCommit = "52a8909")
+$Phase = "p5"
+. (Join-Path $PSScriptRoot "common.ps1")
 $tmp = Join-Path $env:TEMP ("dp_p5_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Force $outDir, $tmp | Out-Null
+New-Item -ItemType Directory -Force $tmp | Out-Null
 Add-Type -AssemblyName System.Drawing
 
 Add-Type -Namespace P5 -Name N -MemberDefinition @'
@@ -21,8 +18,8 @@ Add-Type -Namespace P5 -Name N -MemberDefinition @'
 '@
 function Rect($h) { $r = New-Object P5.N+RECT; $null = [P5.N]::GetWindowRect($h, [ref]$r); [pscustomobject]@{ L = $r.L; T = $r.T; R = $r.R; B = $r.B } }
 function CurClick($x, $y) { $null = [P5.N]::SetCursorPos($x, $y); Start-Sleep -Milliseconds 30; [P5.N]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [P5.N]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
-function AppCommand($id) { $null = [P5.N]::PostMessageW([P5.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero), 0x111, [IntPtr]$id, [IntPtr]::Zero) }
-function PetRect { Rect ([P5.N]::FindWindowW("DesktopPet.Pet", [IntPtr]::Zero)) }
+function AppCommand($id) { $null = [P5.N]::PostMessageW([P5.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero), 0x111, [IntPtr]$id, [IntPtr]::Zero) }
+function PetRect { Rect ([P5.N]::FindWindowW("DesktopPetDev.Pet", [IntPtr]::Zero)) }
 
 function Start-Target($name, $x, $y, $w, $h, $argb) {
     $log = Join-Path $tmp "$name.log"
@@ -32,24 +29,6 @@ function Start-Target($name, $x, $y, $w, $h, $argb) {
     [pscustomobject]@{ Proc = $p; Log = $log }
 }
 
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null; $script:mark = 0
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function WaitLog($pattern, $sec = 5) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = "$detail" })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 
 # 펫이 그린 픽셀(덤프)에서 불투명 점(가장자리에서 먼)과 투명 점(실루엣에서 먼)을 고른다
 function PickPoints($png) {
@@ -86,14 +65,10 @@ try {
     $cfg = Join-Path $tmp "config.toml"
     [IO.File]::WriteAllText($cfg, "[display]`nproximity_reaction = false`n")
     $dump = Join-Path $tmp "render.png"
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $p = Start-Process $pet -ArgumentList @("--config=$cfg", "--pets=1", "--character=test-fox", "--no-behavior", "--spawn=1500,400",
         "--render-dump=$dump", "--test-hooks", "--duration=120") -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
 
     $lib = WaitLog "\[library\] loaded id=test-fox .*renderer=gltf" 5
     Check "L1" "3D 패키지 로드 (renderer=gltf)" $lib "$lib"
@@ -133,9 +108,9 @@ try {
     $exited = $p.WaitForExit(8000)
     Check "X0" "정상 종료" $exited ""
 
-    # 코어 불변 (기준선 P5 완료 판정)
-    $diff = git -C $root diff --stat $BaseCommit -- src/core/physics.h src/core/physics.cpp src/core/world.h src/core/world.cpp src/core/behavior
-    Check "C1" "물리·월드·행동 코어 변경 없음 (P5 시작 $BaseCommit 대비)" ([string]::IsNullOrWhiteSpace(($diff -join ""))) ($diff -join " ")
+    # 코어 불변 (기준선 P5 완료 판정): P5 기간(시작 ~ 완료 커밋)만 본다. 이후 코어 변경(2026-10-20 점프·벽 타기)은 별도 결정
+    $diff = git -C $root diff --stat $BaseCommit $EndCommit -- src/core/physics.h src/core/physics.cpp src/core/world.h src/core/world.cpp src/core/behavior
+    Check "C1" "물리·월드·행동 코어 변경 없음 (P5 기간 $BaseCommit..$EndCommit)" ([string]::IsNullOrWhiteSpace(($diff -join ""))) ($diff -join " ")
 }
 finally {
     if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
@@ -143,7 +118,5 @@ finally {
     if ($script:petLog) { Copy-Item $script:petLog (Join-Path $outDir "desktop-pet.log") }
     Get-ChildItem $tmp -Filter "render_*.png" -ErrorAction SilentlyContinue | Select-Object -Last 1 | Copy-Item -Destination $outDir
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-    $results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-    $pass = @($results | Where-Object Pass).Count
-    Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+    Save-Results
 }

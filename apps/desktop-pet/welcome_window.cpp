@@ -4,6 +4,7 @@
 
 #include "ui/text.h"
 #include "ui/ui_common.h"
+#include "dp_version.h"
 
 namespace dp {
 
@@ -16,7 +17,7 @@ void WelcomeWindow::Show(WelcomeCallbacks callbacks, bool activate, bool noChara
         if (activate) BringToFront();
         return;
     }
-    Open({L"DesktopPet.Welcome", ui::T("welcome.title"), 560, noCharacters ? 450 : 400, 0, 0, false, activate});
+    Open({DP_CLASS_PREFIX L"Welcome", ui::T("welcome.title"), 560, noCharacters ? 450 : 400, 0, 0, false, activate});
 }
 
 void WelcomeWindow::OnCreate() {

@@ -5,12 +5,13 @@
 #include <string>
 
 #include "diagnostics/log.h"
+#include "dp_version.h"
 
 namespace dp::startup {
 
 namespace {
 bool g_test = false;
-constexpr wchar_t kValue[] = L"DesktopPet";
+constexpr wchar_t kValue[] = DP_APP_DIR_NAME;  // 개발 빌드는 "DesktopPet-Dev"
 
 const wchar_t* KeyPath() {
     return g_test ? L"Software\\DesktopPet\\TestRun" : L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";

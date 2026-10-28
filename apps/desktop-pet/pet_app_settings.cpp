@@ -167,7 +167,7 @@ void PetApp::FinishWipe() {
     wil::unique_cotaskmem_string local;
     std::error_code ec;
     const bool isDefault = SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)) &&
-                           fs::equivalent(dir, fs::path(local.get()) / L"DesktopPet", ec);
+                           fs::equivalent(dir, fs::path(local.get()) / DP_APP_DIR_NAME, ec);
     log::Info("[wipe] remove app data default_dir={} — 로그를 닫고 지운 뒤 종료", isDefault);
     log::Shutdown();  // 로그 파일도 지우므로 먼저 닫는다 (이후 로그는 남지 않음)
     // 앱이 만든 것만 지운다 (--config 가 문서 폴더 같은 곳을 가리켜도 그 폴더를 통째로 지우지 않게)
@@ -193,6 +193,13 @@ void PetApp::OpenSettings(SettingsWindow::Page page) {
     cb.openFile = [this] { ShellExecuteW(nullptr, L"open", configPath_.c_str(), nullptr, nullptr, SW_SHOWNORMAL); };
     cb.startupEnabled = [] { return startup::IsEnabled(); };
     cb.wipe = [this] { WipeAllData(); };
+    cb.models = [this] {
+        std::vector<std::pair<std::string, std::wstring>> out;
+        for (const auto& m : models_) out.emplace_back(m.slug, ToWide(m.displayName));
+        return out;
+    };
+    // 기본 모델을 고를 수 있게 목록을 받아 둔다 (로그인했을 때만, 도착하면 설정 창이 다시 채운다)
+    RequestModelsIfNeeded();
     settings_.Show(config_, page, std::move(cb));
 }
 

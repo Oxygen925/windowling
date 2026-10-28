@@ -8,9 +8,11 @@
 #include <format>
 #include <vector>
 
+#include "core/reasoning_effort.h"
 #include "platform/windows/strings.h"
 #include "ui/text.h"
 #include "ui/ui_common.h"
+#include "dp_version.h"
 
 namespace dp {
 
@@ -31,6 +33,10 @@ constexpr Text kTexts[] = {
     {IDC_SET_HOTKEY_HINT, "settings.hotkey_hint"}, {IDC_SET_BUBBLE_L, "settings.bubble"},
     {IDC_SET_HISTORY_L, "settings.history"},       {IDC_SET_FIRST_L, "settings.first_token"},
     {IDC_SET_REQUEST_L, "settings.request_timeout"}, {IDC_SET_AI_NOTE, "settings.ai_note"},
+    {IDC_SET_PET_CHAT + kOff, "settings.pet_chat"}, {IDC_SET_PET_CHAT_L, "settings.pet_chat_interval"},
+    {IDC_SET_PET_CHAT_NOTE, "settings.pet_chat_note"},
+    {IDC_SET_MODEL_L, "settings.model"}, {IDC_SET_EFFORT_L, "settings.effort"},
+    {IDC_SET_PET_EFFORT_L, "settings.pet_chat_effort"}, {IDC_SET_MODEL_NOTE, "settings.model_note"},
     {IDC_SET_OBS_NOTE, "settings.observe_note"},   {IDC_SET_INTERVAL_L, "settings.interval"},
     {IDC_SET_INTERVAL_SEP, "settings.interval_sep"}, {IDC_SET_PER_HOUR_L, "settings.per_hour"},
     {IDC_SET_PER_DAY_L, "settings.per_day"},       {IDC_SET_AWAY_L, "settings.away"},
@@ -58,7 +64,8 @@ constexpr KeyControl kKeyControls[] = {
     {"display.scale", IDC_SET_SCALE},                {"display.frame_rate", IDC_SET_FRAME},
     {"ai.hotkey", IDC_SET_HOTKEY},                   {"ai.history_turns", IDC_SET_HISTORY},
     {"ai.bubble_seconds", IDC_SET_BUBBLE},           {"ai.first_token_timeout_sec", IDC_SET_FIRST},
-    {"ai.request_timeout_sec", IDC_SET_REQUEST},     {"observe.interval_min", IDC_SET_INTERVAL_MIN},
+    {"ai.request_timeout_sec", IDC_SET_REQUEST},     {"ai.pet_chat_interval_min", IDC_SET_PET_CHAT_MIN},
+    {"observe.interval_min", IDC_SET_INTERVAL_MIN},
     {"observe.interval_max", IDC_SET_INTERVAL_MAX},  {"observe.max_per_hour", IDC_SET_PER_HOUR},
     {"observe.max_per_day", IDC_SET_PER_DAY},        {"observe.require_activity_min", IDC_SET_AWAY},
     {"observe.exclude_exe", IDC_SET_EXCLUDE},        {"observe.allowed_behaviors", IDC_SET_BEH_SIT},
@@ -72,6 +79,15 @@ constexpr KeyControl kKeyControls[] = {
 
 constexpr const char* kLanguages[] = {"auto", "ko", "en"};
 constexpr const char* kThemes[] = {"auto", "light", "dark"};
+// effort 고르기 칸의 항목 순서 = core::kReasoningEfforts 순서
+int EffortIndex(const std::string& e) {
+    for (size_t i = 0; i < core::kReasoningEfforts.size(); ++i)
+        if (core::kReasoningEfforts[i] == e) return static_cast<int>(i);
+    return 0;
+}
+std::string EffortAt(int i) {
+    return i >= 0 && i < static_cast<int>(core::kReasoningEfforts.size()) ? std::string(core::kReasoningEfforts[i]) : std::string();
+}
 constexpr const char* kEngines[] = {"winrt", "http", "command"};
 constexpr const char* kBehaviors[] = {"sit", "look", "idle", "walk"};
 constexpr int kBehaviorIds[] = {IDC_SET_BEH_SIT, IDC_SET_BEH_LOOK, IDC_SET_BEH_IDLE, IDC_SET_BEH_WALK};
@@ -139,7 +155,7 @@ void SettingsWindow::Show(const core::Config& current, Page page, SettingsCallba
     base_ = current;
     cb_ = std::move(callbacks);
     page_ = page;
-    Open({L"DesktopPet.Settings", ui::T("settings.title"), 720, 560, 640, 500});
+    Open({DP_CLASS_PREFIX L"Settings", ui::T("settings.title"), 740, 720, 660, 640});
 }
 
 bool SettingsWindow::IsBoldControl(int id) const { return id == IDC_SET_FULLSCREEN_L; }
@@ -169,12 +185,19 @@ void SettingsWindow::OnCreate() {
     note(IDC_SET_WIPE_NOTE);
     // AI 대화
     check(IDC_SET_AI_ENABLED);
+    label(IDC_SET_MODEL_L), combo(IDC_SET_MODEL);
+    label(IDC_SET_EFFORT_L), combo(IDC_SET_EFFORT);
+    note(IDC_SET_MODEL_NOTE);
     label(IDC_SET_HOTKEY_L), edit(IDC_SET_HOTKEY), note(IDC_SET_HOTKEY_HINT);
     label(IDC_SET_BUBBLE_L), number(IDC_SET_BUBBLE);
     label(IDC_SET_HISTORY_L), number(IDC_SET_HISTORY);
     label(IDC_SET_FIRST_L), number(IDC_SET_FIRST);
     label(IDC_SET_REQUEST_L), number(IDC_SET_REQUEST);
     note(IDC_SET_AI_NOTE);
+    check(IDC_SET_PET_CHAT);
+    label(IDC_SET_PET_CHAT_L), number(IDC_SET_PET_CHAT_MIN);
+    label(IDC_SET_PET_EFFORT_L), combo(IDC_SET_PET_EFFORT);
+    note(IDC_SET_PET_CHAT_NOTE);
     // 화면 관찰
     note(IDC_SET_OBS_NOTE);
     label(IDC_SET_INTERVAL_L), number(IDC_SET_INTERVAL_MIN), label(IDC_SET_INTERVAL_SEP), number(IDC_SET_INTERVAL_MAX);
@@ -228,11 +251,42 @@ void SettingsWindow::FillCombos() {
     fill(IDC_SET_LANGUAGE, {"settings.lang_auto", "settings.lang_ko", "settings.lang_en"});
     fill(IDC_SET_THEME, {"settings.theme_auto", "settings.theme_light", "settings.theme_dark"});
     fill(IDC_SET_ENGINE, {"settings.engine_winrt", "settings.engine_http", "settings.engine_command"});
+    for (int id : {IDC_SET_EFFORT, IDC_SET_PET_EFFORT})
+        fill(id, {"settings.effort_default", "settings.effort_none", "settings.effort_minimal", "settings.effort_low",
+                  "settings.effort_medium", "settings.effort_high", "settings.effort_xhigh"});
     HWND nav = Item(IDC_SET_NAV);
     SendMessageW(nav, LB_RESETCONTENT, 0, 0);
     for (const char* k : {"settings.page_general", "settings.page_ai", "settings.page_observe", "settings.page_tts"})
         SendMessageW(nav, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(ui::T(k).c_str()));
     SendMessageW(nav, LB_SETCURSEL, page_, 0);
+}
+
+// 모델: "목록의 첫 모델" + 계정의 목록 (+ 목록에 없는 지금 값)
+void SettingsWindow::FillModels(const std::string& current) {
+    HWND cb = Item(IDC_SET_MODEL);
+    if (!cb) return;
+    SendMessageW(cb, CB_RESETCONTENT, 0, 0);
+    modelSlugs_ = {""};
+    SendMessageW(cb, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(ui::T("settings.model_first").c_str()));
+    int sel = 0;
+    if (cb_.models)
+        for (const auto& [slug, name] : cb_.models()) {
+            modelSlugs_.push_back(slug);
+            SendMessageW(cb, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
+            if (slug == current) sel = static_cast<int>(modelSlugs_.size()) - 1;
+        }
+    if (!current.empty() && sel == 0) {
+        modelSlugs_.push_back(current);
+        SendMessageW(cb, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(ToWide(current).c_str()));
+        sel = static_cast<int>(modelSlugs_.size()) - 1;
+    }
+    SendMessageW(cb, CB_SETCURSEL, sel, 0);
+}
+
+void SettingsWindow::ModelsChanged() {
+    if (!IsOpen()) return;
+    const LRESULT i = SendMessageW(Item(IDC_SET_MODEL), CB_GETCURSEL, 0, 0);
+    FillModels(i >= 0 && i < static_cast<LRESULT>(modelSlugs_.size()) ? modelSlugs_[static_cast<size_t>(i)] : base_.ai.model);
 }
 
 void SettingsWindow::Fill(const core::Config& c) {
@@ -267,6 +321,11 @@ void SettingsWindow::Fill(const core::Config& c) {
     num(IDC_SET_HISTORY, c.ai.historyTurns);
     num(IDC_SET_FIRST, c.ai.firstTokenTimeoutSec);
     num(IDC_SET_REQUEST, c.ai.requestTimeoutSec);
+    checked(IDC_SET_PET_CHAT, c.ai.petChat);
+    select(IDC_SET_EFFORT, EffortIndex(c.ai.reasoningEffort));
+    select(IDC_SET_PET_EFFORT, EffortIndex(c.ai.petChatEffort));
+    FillModels(c.ai.model);
+    num(IDC_SET_PET_CHAT_MIN, c.ai.petChatIntervalMin);
 
     const auto& o = c.observe;
     num(IDC_SET_INTERVAL_MIN, o.intervalMinMin);
@@ -344,8 +403,16 @@ bool SettingsWindow::Read(core::Config& out, int& badId) const {
     if (!toInt(IDC_SET_BUBBLE, text(IDC_SET_BUBBLE), out.ai.bubbleSeconds) ||
         !toInt(IDC_SET_HISTORY, text(IDC_SET_HISTORY), out.ai.historyTurns) ||
         !toInt(IDC_SET_FIRST, text(IDC_SET_FIRST), out.ai.firstTokenTimeoutSec) ||
-        !toInt(IDC_SET_REQUEST, text(IDC_SET_REQUEST), out.ai.requestTimeoutSec))
+        !toInt(IDC_SET_REQUEST, text(IDC_SET_REQUEST), out.ai.requestTimeoutSec) ||
+        !toInt(IDC_SET_PET_CHAT_MIN, text(IDC_SET_PET_CHAT_MIN), out.ai.petChatIntervalMin))
         return false;
+    out.ai.petChat = isChecked(IDC_SET_PET_CHAT);
+    out.ai.reasoningEffort = EffortAt(index(IDC_SET_EFFORT));
+    out.ai.petChatEffort = EffortAt(index(IDC_SET_PET_EFFORT));
+    {
+        const int m = index(IDC_SET_MODEL);
+        out.ai.model = m >= 0 && m < static_cast<int>(modelSlugs_.size()) ? modelSlugs_[m] : base_.ai.model;
+    }
 
     auto& o = out.observe;
     if (!toInt(IDC_SET_INTERVAL_MIN, text(IDC_SET_INTERVAL_MIN), o.intervalMinMin) ||
@@ -525,6 +592,9 @@ void SettingsWindow::OnLayout(int width, int height) {
             break;
         case kAi:
             check(IDC_SET_AI_ENABLED);
+            field(IDC_SET_MODEL_L, IDC_SET_MODEL, 260);
+            field(IDC_SET_EFFORT_L, IDC_SET_EFFORT, 200);
+            note(IDC_SET_MODEL_NOTE, 3);
             field(IDC_SET_HOTKEY_L, IDC_SET_HOTKEY, 180);
             mv(IDC_SET_HOTKEY_HINT, cx, y - gap + S(2), avail, S(20));
             y += S(20) + gap;
@@ -532,7 +602,11 @@ void SettingsWindow::OnLayout(int width, int height) {
             field(IDC_SET_HISTORY_L, IDC_SET_HISTORY, 80);
             field(IDC_SET_FIRST_L, IDC_SET_FIRST, 80);
             field(IDC_SET_REQUEST_L, IDC_SET_REQUEST, 80);
-            note(IDC_SET_AI_NOTE, 2);
+            note(IDC_SET_AI_NOTE, 1);
+            check(IDC_SET_PET_CHAT);
+            field(IDC_SET_PET_CHAT_L, IDC_SET_PET_CHAT_MIN, 80);
+            field(IDC_SET_PET_EFFORT_L, IDC_SET_PET_EFFORT, 200);
+            note(IDC_SET_PET_CHAT_NOTE, 2);
             break;
         case kObserve: {
             note(IDC_SET_OBS_NOTE, 2);

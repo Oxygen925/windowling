@@ -2,12 +2,8 @@
 # 별도 프로세스 대상 창을 움직이고, desktop-pet 로그로 펫 상태를 판정한다.
 # 실행 중 마우스가 자동으로 움직인다 (드래그·클릭). PC를 만지지 않는다.
 param([string]$Preset = "x64-release")
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_LANGUAGE = "ko"; $env:DP_TEST_NO_WELCOME = "1"  # 시나리오: 화면 문구 한국어 고정, 환영 창 끔
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$pet = Join-Path $root "build\$Preset\desktop-pet.exe"
-$outDir = Join-Path $root ("logs\p1\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
-New-Item -ItemType Directory -Force $outDir | Out-Null
+$Phase = "p1"
+. (Join-Path $PSScriptRoot "common.ps1")
 
 Add-Type -Namespace P1 -Name N -MemberDefinition @'
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindowW(string cls, System.IntPtr title);
@@ -45,43 +41,19 @@ function Start-Target($name, $x, $y, $w, $h, $argb) {
 }
 
 # ---- 펫 로그 ----
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null
-$script:mark = 0
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function WaitLog($pattern, $sec = 5) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-function SinceMark($pattern) { @(PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern }) }
-function PetRect { Rect ([P1.N]::FindWindowW("DesktopPet.Pet", [IntPtr]::Zero)) }
+function PetRect { Rect ([P1.N]::FindWindowW("DesktopPetDev.Pet", [IntPtr]::Zero)) }
 function PetFoot { $r = PetRect; [pscustomobject]@{ X = ($r.L + $r.R) / 2.0; Y = $r.B } }
 function PetBelly { $r = PetRect; @([int](($r.L + $r.R) / 2), [int]($r.T + ($r.B - $r.T) * 0.75)) }
 
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = $detail })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 
 # ---- 준비 ----
 $T = Start-Target "target" 600 500 900 400 -13421705
 $C = Start-Target "cover" -3000 0 300 300 -6710887      # 가림 실험용 (화면 밖 대기)
 CurClick 1400 860; Start-Sleep -Milliseconds 300        # 대상 창 활성화 (펫과 겹치지 않는 지점)
 
-$before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+$before = LogNames
 $pp = Start-Process $pet -ArgumentList @("--no-behavior", "--spawn=1000,150", "--duration=300") -PassThru
-for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-    Start-Sleep -Milliseconds 200
-    $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-    if ($new) { $script:petLog = $new.FullName }
-}
+$null = Find-NewLog $before
 
 try {
     # W1 착지
@@ -180,12 +152,10 @@ try {
 }
 finally {
     CurMove 2400 1300
-    $app = [P1.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero)
+    $app = [P1.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero)
     if ($app -ne [IntPtr]::Zero) { $null = [P1.N]::PostMessageW($app, 0x111, [IntPtr]106, [IntPtr]::Zero) }
     if (-not $pp.WaitForExit(5000)) { Stop-Process -Id $pp.Id -Force }
     foreach ($w in $T, $C) { if ($w -and -not $w.Proc.HasExited) { Stop-Process -Id $w.Proc.Id -Force } }
     if ($script:petLog) { Copy-Item $script:petLog (Join-Path $outDir "desktop-pet.log") }
-    $results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-    $pass = @($results | Where-Object Pass).Count
-    Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+    Save-Results
 }

@@ -7,3 +7,16 @@
 #define DP_VERSION_WSTRING L"@PROJECT_VERSION@"
 // 업데이트 확인 저장소 (빈 문자열 = 확인 안 함)
 #define DP_RELEASE_REPO "@DP_RELEASE_REPO@"
+// 실행 채널. 개발 빌드는 배포판과 데이터 폴더(%LOCALAPPDATA%\<이름>)·창 클래스·단일 실행 mutex·시작 프로그램 값 이름이 다르다
+#cmakedefine01 DP_DEV_CHANNEL
+#if DP_DEV_CHANNEL
+#define DP_APP_DIR_NAME L"DesktopPet-Dev"
+#define DP_CLASS_PREFIX L"DesktopPetDev."
+#define DP_CHANNEL_SUFFIX L" (Dev)"
+#define DP_CHANNEL_NAME "dev"
+#else
+#define DP_APP_DIR_NAME L"DesktopPet"
+#define DP_CLASS_PREFIX L"DesktopPet."
+#define DP_CHANNEL_SUFFIX L""
+#define DP_CHANNEL_NAME "release"
+#endif

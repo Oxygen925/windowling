@@ -1,6 +1,7 @@
 ﻿# 예제 캐릭터 Windowling 스프라이트 시트 생성 (MIT). 앱 아이콘(tools/assets/app_icon.svg)의 창 + 세로 눈에 다리를 단 모양.
-# 기본 출력: characters/windowling/render/sprite/atlas.png — 128x128 프레임 11개 가로 배열 (오른쪽 보기, 왼쪽은 앱이 뒤집는다)
+# 기본 출력: characters/windowling/render/sprite/atlas.png — 128x128 프레임 18개 가로 배열 (오른쪽 보기, 왼쪽은 앱이 뒤집는다)
 #   0 idle, 1 깜빡임, 2 걷기 기본, 3 걷기 왼발 듦, 4 걷기 오른발 듦, 5 sit, 6 fall, 7 drag, 8 look, 9 talk(입 벌림), 10 talk(입 작게)
+#   11 jump, 12~14 climb (벽이 오른쪽), 15~16 highfive (팔이 없어 몸으로: 웅크림 → 뛰며 친구 쪽으로 기울기), 17 lean (붙어 앉기)
 # 좌표는 100 단위 설계를 프레임 크기에 비례해 그린다. 몸통 기본 x 24~76, y 20~70.
 # 사용: powershell -File tools\assets\gen_windowling_sprite.ps1 [-OutDir ...] [-Preview 미리보기.png]
 param(
@@ -29,7 +30,8 @@ function Line($g, $pts, $w, $col) {
 }
 function OLine($g, $pts, $w, $col) { Line $g $pts ($w + 3) $lineC; Line $g $pts $w $col }
 
-# 자세: dy = 몸통 위아래, rot = 기울기(도), L/R = 발 위치(다리 길이 90% 적용 전), toe = 발끝, eyes/mouth = 표정
+# 자세: dy = 몸통 위아래, rot = 기울기(도, + 는 앞쪽), pivot/pivotX = 기울기 중심 (기본 50, 20 = 몸통 위),
+#       L/R = 발 위치(다리 길이 90% 적용 전), toe = 발끝, eyes/mouth = 표정, wall = 벽에 붙음 (반시계 90°: 발이 프레임 오른쪽, 앞이 위)
 $LegScale = 0.9; $BASE = 3   # 다리 길이 비율, 전체를 아래로 (발이 프레임 바닥에 닿게)
 $frames = @(
     @{ dy = 0;  L = @(38, 93); R = @(62, 93); eyes = "pill" },                 # 0 idle
@@ -42,7 +44,14 @@ $frames = @(
     @{ dy = -8; L = @(38, 92); R = @(61, 90); eyes = "squint"; rot = -10; toe = $false },  # 7 drag
     @{ dy = 0;  L = @(38, 93); R = @(62, 93); eyes = "up" },                   # 8 look
     @{ dy = 0;  L = @(38, 93); R = @(62, 93); eyes = "pill"; mouth = 5 },      # 9 talk
-    @{ dy = 0;  L = @(38, 93); R = @(62, 93); eyes = "pill"; mouth = 2 }       # 10 talk
+    @{ dy = 0;  L = @(38, 93); R = @(62, 93); eyes = "pill"; mouth = 2 },      # 10 talk
+    @{ dy = -6; L = @(32, 85); R = @(68, 85); eyes = "happy" },                # 11 jump: 다리 벌리고 신나게
+    @{ wall = $true; dy = 0; L = @(38, 93); R = @(62, 86); eyes = "up" },      # 12 climb: 앞발 뗌
+    @{ wall = $true; dy = 0; L = @(38, 93); R = @(62, 93); eyes = "up" },      # 13 climb: 둘 다 붙임
+    @{ wall = $true; dy = 0; L = @(38, 86); R = @(62, 93); eyes = "up" },      # 14 climb: 뒷발 뗌
+    @{ dy = 6;  L = @(30, 92); R = @(70, 92); eyes = "happy" },                # 15 highfive: 웅크림
+    @{ dy = -8; L = @(42, 86); R = @(64, 89); eyes = "happy"; rot = 14; pivot = 90 },  # 16 highfive: 뛰며 친구 쪽으로
+    @{ dy = 10; L = @(27, 97); R = @(73, 91); eyes = "happy"; rot = 7; pivot = 90; pivotX = 72 }  # 17 lean: 앉아서 친구 쪽으로 기댐 (친구 쪽 발이 축)
 )
 
 function Eyes($g, $kind, $cy) {
@@ -64,8 +73,11 @@ function Eyes($g, $kind, $cy) {
 function DrawFrame($g, $ox, $p) {
     $st = $g.Save()
     $g.TranslateTransform($ox, 0)
+    # 벽: 반시계 90° (원래 y → 가로, 원래 x → 세로 뒤집힘). 발끝이 프레임 오른쪽, 몸 아래 끝이 프레임 바닥
+    if ($p.wall) { $g.TranslateTransform(-(U 1), (U 119)); $g.RotateTransform(-90) }
     $g.TranslateTransform(0, (U $BASE))
-    if ($p.rot) { $g.TranslateTransform((U 50), (U 20)); $g.RotateTransform($p.rot); $g.TranslateTransform(-(U 50), -(U 20)) }
+    $py = if ($p.pivot) { $p.pivot } else { 20 }; $px = if ($p.pivotX) { $p.pivotX } else { 50 }
+    if ($p.rot) { $g.TranslateTransform((U $px), (U $py)); $g.RotateTransform($p.rot); $g.TranslateTransform(-(U $px), -(U $py)) }
     $top = 20 + $p.dy; $bot = 70 + $p.dy
     # 다리 (몸통 뒤). 엉덩이에서 발까지, 발끝은 오른쪽
     foreach ($leg in @(@(40, $p.L), @(60, $p.R))) {

@@ -2,15 +2,10 @@
 # 사용자 config.toml·자격 증명은 건드리지 않는다: 임시 폴더의 --config 로 실행 (자격 증명도 그 폴더의 auth\).
 # 실행 중 대화창이 열리고 키 입력(단축키 1회)이 발생한다. PC를 만지지 않는다.
 param([string]$Preset = "x64-release")
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_LANGUAGE = "ko"; $env:DP_TEST_NO_WELCOME = "1"  # 시나리오: 화면 문구 한국어 고정, 환영 창 끔
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$bin = Join-Path $root "build\$Preset"
-$pet = Join-Path $bin "desktop-pet.exe"
-$mockExe = Join-Path $bin "mock-siwc.exe"
-$outDir = Join-Path $root ("logs\p3\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
+$Phase = "p3"
+. (Join-Path $PSScriptRoot "common.ps1")
 $tmp = Join-Path $env:TEMP ("dp_p3_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Force $outDir, $tmp | Out-Null
+New-Item -ItemType Directory -Force $tmp | Out-Null
 Add-Type -AssemblyName System.Security
 
 Add-Type -Namespace P3 -Name N -MemberDefinition @'
@@ -30,8 +25,8 @@ Add-Type -Namespace P3 -Name N -MemberDefinition @'
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct POINT { public int X, Y; }
 '@
 $WM_COMMAND = 0x111; $WM_SETTEXT = 0x0C; $WM_GETTEXT = 0x0D; $WM_CLOSE = 0x10
-function App { [P3.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero) }
-function Chat { [P3.N]::FindWindowW("DesktopPet.Chat", [IntPtr]::Zero) }
+function App { [P3.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero) }
+function Chat { [P3.N]::FindWindowW("DesktopPetDev.Chat", [IntPtr]::Zero) }
 function AppCommand($id) { $null = [P3.N]::PostMessageW((App), $WM_COMMAND, [IntPtr]$id, [IntPtr]::Zero) }
 function ChatClick($id) { $c = Chat; $null = [P3.N]::PostMessageW($c, $WM_COMMAND, [IntPtr]$id, [P3.N]::GetDlgItem($c, $id)) }
 function ChatText($id) {
@@ -45,13 +40,7 @@ function Say($text) {
 }
 
 # ---- 모의 서버 ----
-$portFile = Join-Path $tmp "port.txt"
-$mock = Start-Process $mockExe -ArgumentList @("--port-file=$portFile") -PassThru -WindowStyle Hidden
-for ($i = 0; $i -lt 100 -and -not (Test-Path $portFile); $i++) { Start-Sleep -Milliseconds 100 }
-$base = "http://127.0.0.1:" + (Get-Content $portFile).Trim()
-function Mock($q) { $null = Invoke-RestMethod -UseBasicParsing "$base/control?$q" }
-function Stats { Invoke-RestMethod -UseBasicParsing "$base/stats" }
-function StatN($k) { $s = Stats; if ($s.PSObject.Properties[$k]) { [int]$s.$k } else { 0 } }
+Start-Mock $tmp
 
 # ---- 설정·자격 증명 (임시) ----
 $cfgDir = Join-Path $tmp "cfg"; New-Item -ItemType Directory -Force $cfgDir | Out-Null
@@ -67,36 +56,13 @@ function CredPlain {
 function CredRaw { $f = Get-ChildItem (Join-Path $cfgDir "auth") -Filter "siwc-*.bin" | Select-Object -First 1; [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($f.FullName)) }
 
 # ---- 로그 ----
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null; $script:mark = 0; $script:allLogs = @()
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function SinceMark($pattern) { @(PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern }) }
-function WaitLog($pattern, $sec = 6) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = "$detail" })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 
 function StartPet {
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $script:petLog = $null
     $p = Start-Process $pet -ArgumentList @("--config=$cfg", "--ai", "--ai-endpoint=$base", "--ai-open-url-file=$urlFile",
         "--no-behavior", "--pets=1", "--character=test-blue", "--spawn=1500,150", "--duration=600") -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:allLogs += $script:petLog
     $script:mark = 0
     $null = WaitLog "\[ai\] enabled endpoint=loopback-test" 8
@@ -215,7 +181,7 @@ try {
     $r = Turn "안녕 $secret"
     $lr = (Stats).last_responses
     $hist = ChatText 215
-    $bubble = [P3.N]::FindWindowW("DesktopPet.Bubble", [IntPtr]::Zero)
+    $bubble = [P3.N]::FindWindowW("DesktopPetDev.Bubble", [IntPtr]::Zero)
     $bubbleVisible = $bubble -ne [IntPtr]::Zero -and [P3.N]::IsWindowVisible($bubble)
     Check "C1a" "대화 스트림 완료 → 기록·말풍선" ($r -match "outcome=completed" -and $hist -match "모의 응답" -and $bubbleVisible) "bubble=$bubbleVisible hist=$($hist.Length) $r"
     # 말풍선은 항상 클릭 통과: 가운데 지점의 창이 말풍선이 아니어야 한다 (WS_EX_TRANSPARENT + LAYERED)
@@ -344,6 +310,71 @@ try {
     Check "X1" "스트림 중 종료 → 5초 안에 종료" ($x.Exited -and $x.Ms -lt 5000) "$($x.Ms)ms"
     Mock "reset=1"
 
+    # ---- 펫끼리 AI 대화 (설정 ai.pet_chat, 2026-10-20) ----
+    # 인사를 켠 시험 캐릭터 2마리 (test-blue 복사), 행동 끔. 9002 명령(--test-hooks)으로 펫 0·1 이 인사하게 한다
+    $pcChars = Join-Path $tmp "pc_chars"
+    $pcPkg = Join-Path $pcChars "pc-greeter"
+    Copy-Item (Join-Path $bin "characters\test-blue") $pcPkg -Recurse
+    $mf = Join-Path $pcPkg "manifest.toml"
+    [IO.File]::WriteAllText($mf, ([IO.File]::ReadAllText($mf) -replace 'id = "test-blue"', 'id = "pc-greeter"'))
+    $bf = Join-Path $pcPkg "behaviors\behavior.toml"
+    [IO.File]::WriteAllText($bf, "greet = true`n" + [IO.File]::ReadAllText($bf))
+    [IO.File]::WriteAllText($cfg, "[display]`nproximity_reaction = false`n[ai]`nhotkey = `"Ctrl+Alt+F9`"`nbubble_seconds = 3`nfirst_token_timeout_sec = 3`nrequest_timeout_sec = 12`npet_chat = true`npet_chat_interval_min = 1`n")
+    $before = LogNames
+    $script:petLog = $null
+    $p = Start-Process $pet -ArgumentList @("--config=$cfg", "--ai", "--ai-endpoint=$base", "--ai-open-url-file=$urlFile",
+        "--characters-dir=$pcChars", "--no-behavior", "--pets=2", "--character=pc-greeter", "--spawn=1500,150", "--spawn-step=-150",
+        "--duration=300", "--test-hooks") -PassThru
+    $null = Find-NewLog $before
+    $script:allLogs += $script:petLog
+    $script:mark = 0
+    $null = WaitLog "\[ai\] enabled endpoint=loopback-test" 8
+    $null = WaitLog "\[pet1\] event=Landed" 6
+    AppCommand 110  # 대화창을 한 번 열어 모델 목록을 받고 닫는다 (대화창이 열려 있으면 펫끼리 대화는 양보)
+    $models = WaitLog "\[ai\] ui models count=" 6
+    $null = [P3.N]::PostMessageW((Chat), $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 300
+    $req0 = StatN "responses"
+    Mark; AppCommand 9002
+    $start = WaitLog "\[pet-chat\] start a=pet0 b=pet1" 4
+    $d1 = WaitLog "\[pet-chat\] done stage=1 .*outcome=completed" 8
+    $d2 = WaitLog "\[pet-chat\] done stage=2 .*outcome=completed" 8
+    $req1 = StatN "responses"
+    Check "PC1" "펫끼리 AI 대화: 인사 → a 한마디 → b 답 (요청 2번, 대화창 이력 없음)" ($models -and $start -and $d1 -and $d2 -and $req1 - $req0 -eq 2) "requests=$($req1 - $req0)"
+    # 사용자 대화가 끼어들면 펫끼리 대화를 양보한다 (취소), 사용자 대화 이력에는 펫끼리 말이 없다 (turns=1)
+    Mock "responses=slow"
+    Mark; AppCommand 9002
+    $start2 = WaitLog "\[pet-chat\] start" 4
+    Mock "reset=1"
+    AppCommand 110
+    for ($i = 0; $i -lt 30 -and (Chat) -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 100 }
+    Start-Sleep -Milliseconds 300
+    Say "끼어들기"
+    $cancel = WaitLog "\[pet-chat\] done stage=1 .*outcome=cancelled" 6
+    $userSend = WaitLog "\[ai\] send pet=1 request=\d+ turns=1 " 6
+    $userDone = WaitLog "\[ai\] stream done pet=1 .*outcome=completed" 10
+    Check "PC2" "사용자 대화가 끼어들면 펫끼리 대화 취소, 사용자 이력에 펫끼리 말 없음 (turns=1)" ($start2 -and $cancel -and $userSend -and $userDone) "cancel=$([bool]$cancel) send=$([bool]$userSend)"
+    # effort (2026-10-21): 설정의 effort 를 보내고, 모델이 거부하면 effort 없이 한 번 더 보내 완료
+    $null = [P3.N]::PostMessageW((Chat), $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+    $x = StopPet $p
+    Check "X2" "정상 종료" ($x.Exited) "$($x.Ms)ms"
+    [IO.File]::WriteAllText($cfg, "[display]`nproximity_reaction = false`n[ai]`nhotkey = `"Ctrl+Alt+F9`"`nbubble_seconds = 3`nfirst_token_timeout_sec = 3`nrequest_timeout_sec = 12`nreasoning_effort = `"high`"`n")
+    $p = StartPet
+    $null = WaitLog "\[ai\] ui models count=" 6
+    $w0 = StatN "with_effort"
+    $r = Turn "effort 확인"
+    $e1 = (Stats).last_responses.effort
+    Mock "reasoning=reject"
+    $rej0 = StatN "effort_rejected"
+    $r2 = Turn "effort 거부"
+    $rej1 = StatN "effort_rejected"
+    $note = SinceMark "\[ai\] effort=high rejected by model"
+    Mock "reset=1"
+    Check "E1" "설정의 effort 를 요청에 보냄 (reasoning.effort=high)" ($r -match "outcome=completed" -and $e1 -eq "high" -and (StatN "with_effort") -gt $w0) "effort=$e1"
+    Check "E2" "모델이 effort 를 거부하면 빼고 다시 보내 완료" ($r2 -match "outcome=completed" -and $rej1 -eq $rej0 + 1 -and $note.Count -eq 1 -and (Stats).last_responses.effort -eq "") "rejected=$($rej1 - $rej0)"
+    $x = StopPet $p
+    Check "X3" "정상 종료" ($x.Exited) "$($x.Ms)ms"
+
     # ---- 비밀 유출 없음 ----
     $leaks = @()
     foreach ($l in $script:allLogs) {
@@ -359,7 +390,5 @@ finally {
     if ($mock -and -not $mock.HasExited) { Stop-Process -Id $mock.Id -Force }
     $i = 0; foreach ($l in $script:allLogs) { if ($l) { Copy-Item $l (Join-Path $outDir ("desktop-pet_{0}.log" -f $i++)) } }
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-    $results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-    $pass = @($results | Where-Object Pass).Count
-    Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+    Save-Results
 }

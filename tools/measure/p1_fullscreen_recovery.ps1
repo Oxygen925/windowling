@@ -81,7 +81,7 @@ foreach ($cond in "nopet", "pet") {
     }
     $pmp.WaitForExit()
     if ($pp) {
-        [void][FR.N]::PostMessageW([FR.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero), 0x111, [IntPtr]106, [IntPtr]::Zero)
+        [void][FR.N]::PostMessageW([FR.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero), 0x111, [IntPtr]106, [IntPtr]::Zero)
         if (-not $pp.WaitForExit(5000)) { Stop-Process -Id $pp.Id -Force }
     }
 }

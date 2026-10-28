@@ -25,7 +25,7 @@ namespace {
 std::filesystem::path UserDataDir() {
     wil::unique_cotaskmem_string local;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) return std::filesystem::temp_directory_path();
-    return std::filesystem::path(local.get()) / L"DesktopPet";
+    return std::filesystem::path(local.get()) / DP_APP_DIR_NAME;
 }
 
 // config.toml 이 없으면 기본값으로 만들고, 있으면 읽는다. 문제는 경고 로그만 남기고 기본값으로 진행 (D13과 같은 원칙)
@@ -46,7 +46,7 @@ dp::core::Config LoadOrCreateConfig(const std::filesystem::path& path) {
     return result.config;
 }
 
-// 개발·테스트용 명령행: --pets=N --character=id --characters-dir=path --config=path --spawn=X,Y --spawn-step=DX --ai --ai-endpoint=http://127.0.0.1:N --ai-open-url-file=path --observe-interval-sec=N --observe-dump=path.jpg --no-behavior --force-walk --metrics=path.csv --duration=초
+// 개발·테스트용 명령행: --pets=N --character=id --characters-dir=path --config=path --spawn=X,Y --spawn-step=DX --ai --ai-endpoint=http://127.0.0.1:N --ai-open-url-file=path --observe-interval-sec=N --observe-dump=path.jpg --no-behavior --force-walk --force-activity=jump|climb --metrics=path.csv --duration=초
 dp::LaunchOptions ParseArgs() {
     dp::LaunchOptions o;
     int argc = 0;
@@ -87,6 +87,7 @@ dp::LaunchOptions ParseArgs() {
         else if (auto uu = val(L"--update-url=")) o.updateUrl = dp::ToUtf8(uu);
         else if (auto ur = val(L"--update-repo=")) o.updateRepo = dp::ToUtf8(ur);
         else if (auto ud = val(L"--update-delay-sec=")) o.updateDelaySec = std::max(1, _wtoi(ud));
+        else if (auto fa = val(L"--force-activity=")) o.forceActivity = dp::ToUtf8(fa);
 #endif
         else dp::log::Warn("알 수 없는 인자: {}", dp::ToUtf8(a));
     }
@@ -104,14 +105,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     std::error_code ec;
     std::filesystem::create_directories(dataDir / L"logs", ec);
     dp::log::Init((dataDir / L"logs").wstring());
-    dp::log::Info("Desktop Pet {}", DP_VERSION_STRING);
+    dp::log::Info("Desktop Pet {} channel={}", DP_VERSION_STRING, DP_CHANNEL_NAME);
     dp::core::SetLogSink([](dp::core::LogLevel level, const std::string& msg) {
         dp::log::Write(level == dp::core::LogLevel::Error ? "ERROR" : level == dp::core::LogLevel::Warn ? "WARN" : "INFO",
                        "[core] " + msg);
     });
 
     wil::unique_mutex_nothrow single;
-    single.reset(CreateMutexW(nullptr, TRUE, L"Local\\DesktopPet.App"));
+    single.reset(CreateMutexW(nullptr, TRUE, L"Local\\" DP_CLASS_PREFIX L"App"));
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         dp::log::Info("이미 실행 중 — 종료");
         dp::log::Shutdown();

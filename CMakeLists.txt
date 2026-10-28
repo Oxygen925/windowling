@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 # 버전은 여기 한 곳 (실행 파일 VERSIONINFO·앱 표시·릴리스 latest.json, P6)
-project(desktop_pet VERSION 0.1.0 LANGUAGES CXX)
+project(desktop_pet VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,8 @@ add_compile_options(/W4 /permissive- /utf-8 /Zc:__cplusplus /EHsc)
 # ---- 버전 헤더 (생성) ----
 # 업데이트 확인할 GitHub 저장소 ("소유자/저장소"). 비우면 확인하지 않는다 (릴리스 CI 가 지정, P6-03)
 set(DP_RELEASE_REPO "" CACHE STRING "업데이트 확인 저장소 (소유자/저장소)")
+# 실행 채널: 개발 빌드는 데이터 폴더·창 클래스·mutex·시작 등록 이름을 따로 써서 배포판과 섞이지 않는다. 배포 빌드(x64-dist)는 OFF
+option(DP_DEV_CHANNEL "개발 채널 (DesktopPet-Dev 데이터 폴더)" ON)
 configure_file(${CMAKE_SOURCE_DIR}/src/dp_version.h.in ${CMAKE_BINARY_DIR}/generated/dp_version.h @ONLY)
 
 # 개발·측정 도구 (p0-spike·mock-siwc·ui-gallery·frame-grab·p0-counters). 배포 빌드(x64-dist)는 OFF
@@ -80,6 +82,7 @@ add_library(dp_core STATIC
   src/core/release.cpp
   src/core/character/animation.cpp
   src/core/behavior/fsm.cpp
+  src/core/behavior/social.cpp
 )
 target_include_directories(dp_core PUBLIC src)
 target_link_libraries(dp_core PUBLIC tomlplusplus::tomlplusplus PRIVATE nlohmann_json::nlohmann_json)
@@ -99,6 +102,7 @@ add_library(dp_ai STATIC
   src/ai/siwc_protocol.cpp
   src/ai/responses.cpp
   src/ai/observe.cpp
+  src/ai/pet_chat.cpp
 )
 target_include_directories(dp_ai PUBLIC src)
 target_link_libraries(dp_ai PUBLIC nlohmann_json::nlohmann_json)
@@ -173,6 +177,8 @@ add_executable(desktop-pet WIN32
   apps/desktop-pet/pet_app.cpp
   apps/desktop-pet/pet_app_ai.cpp
   apps/desktop-pet/pet_app_observe.cpp
+  apps/desktop-pet/pet_app_behavior.cpp
+  apps/desktop-pet/pet_app_social.cpp
   apps/desktop-pet/pet_app_settings.cpp
   apps/desktop-pet/pet_app_characters.cpp
   apps/desktop-pet/pet_app_model.cpp
@@ -279,6 +285,7 @@ add_executable(dp_core_tests
   tests/unit/geometry_tests.cpp
   tests/unit/core_tests.cpp
   tests/unit/world_physics_tests.cpp
+  tests/unit/social_tests.cpp
   tests/unit/character_tests.cpp
   tests/unit/lua_tests.cpp
   tests/unit/ai_tests.cpp

@@ -1,6 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 #include "core/config.h"
 #include "core/event_bus.h"
 #include "core/scheduler.h"
@@ -263,4 +265,51 @@ TEST_CASE("Loopback URL check parses the authority", "[config][security]") {
                             "http://127.0.0.1:0/", "http://127.0.0.1:70000/", "http://127.0.0.1:12ab/", "http://[::1/",
                             "http://127.0.0.2/", "http://127.0.0.1 /", "http:///"})
         CHECK_FALSE(IsLoopbackUrl(bad));
+}
+
+
+TEST_CASE("Config ai.pet_chat", "[config]") {
+    auto d = ParseConfig("");
+    CHECK_FALSE(d.config.ai.petChat);  // 기본 끔 (요청이 나가는 기능)
+    CHECK(d.config.ai.petChatIntervalMin == 10);
+    auto r = ParseConfig("[ai]\npet_chat = true\npet_chat_interval_min = 3\n");
+    CHECK(r.warnings.empty());
+    CHECK(r.config.ai.petChat);
+    CHECK(r.config.ai.petChatIntervalMin == 3);
+    auto bad = ParseConfig("[ai]\npet_chat_interval_min = 0\n");
+    CHECK(bad.config.ai.petChatIntervalMin == 10);
+    CHECK_FALSE(bad.warnings.empty());
+    // 저장 → 다시 읽기, 설정 창 항목 목록
+    auto round = ParseConfig(SerializeConfig(r.config));
+    CHECK(round.config.ai.petChat);
+    CHECK(round.config.ai.petChatIntervalMin == 3);
+    Config a, b;
+    b.ai.petChat = true;
+    const auto diff = DiffUiFields(a, b);
+    CHECK(std::find(diff.begin(), diff.end(), "ai.pet_chat") != diff.end());
+}
+
+
+TEST_CASE("Config ai model and effort", "[config]") {
+    auto d = ParseConfig("");
+    CHECK(d.config.ai.reasoningEffort.empty());
+    CHECK(d.config.ai.petChatEffort == "low");
+    auto r = ParseConfig("[ai]\nmodel = \"gpt-x\"\nreasoning_effort = \"high\"\npet_chat_effort = \"default\"\n");
+    CHECK(r.warnings.empty());
+    CHECK(r.config.ai.model == "gpt-x");
+    CHECK(r.config.ai.reasoningEffort == "high");
+    CHECK(r.config.ai.petChatEffort.empty());  // "default" = 보내지 않음
+    auto bad = ParseConfig("[ai]\nreasoning_effort = \"turbo\"\n");
+    CHECK(bad.config.ai.reasoningEffort.empty());
+    CHECK_FALSE(bad.warnings.empty());
+    auto round = ParseConfig(SerializeConfig(r.config));
+    CHECK(round.warnings.empty());
+    CHECK(round.config.ai.reasoningEffort == "high");
+    CHECK(round.config.ai.petChatEffort.empty());
+    Config a, b;
+    b.ai.model = "gpt-x";
+    b.ai.petChatEffort = "medium";
+    const auto diff = DiffUiFields(a, b);
+    CHECK(std::find(diff.begin(), diff.end(), "ai.model") != diff.end());
+    CHECK(std::find(diff.begin(), diff.end(), "ai.pet_chat_effort") != diff.end());
 }

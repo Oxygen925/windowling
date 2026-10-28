@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.1
+
+- Sample character Windowling 1.1.0: jumps, climbs walls, and with two or more Windowlings greets, plays tag, high-fives (with its body), bumps, sits together and walks in a line. Re-install it from this release to get the new moves
+- Optional actions for characters: jump (onto a higher window top within reach, or a small hop) and climb (up a window side onto its top, or up the outer screen edge and jump off). Enabled per character with `jump`/`climb` in `[activities]` and the `jump`/`climb` animations
+- Development builds use a separate data folder (`DesktopPet-Dev`)
+- Screen watching limits: 0 means no limit for the per-hour and per-day caps (interval down to 1 minute); consent and status windows show it; going from a limit to no limit asks for consent again
+- Settings: default model and reasoning effort for chat and screen watching, and a separate effort for pet chat (sent as `reasoning.effort`; if the model rejects it, the request is sent again without it)
+- More pet interactions (per character): high five, bumping into each other, sitting together, walking in a line, pair programming with a review, a wall-climbing race, stacking on each other's heads (up to 3), and chasing a bug that shows up now and then (`bump`, `lean`, `train`, `bug_hunt`, `highfive`/`lean`/`bug` animations)
+- Pets can chat with each other using AI when they meet (setting, off by default, at most every 10 minutes by default; yields to your chat and screen watching, not read aloud)
+- Optional per character: a short rest between activities (`rest_between`), jumping across to same-level or lower windows and leaping onto floating window sides, pets greeting each other and playing tag (`greet`, `follow`)
+
+---
+
+- 예제 캐릭터 Windowling 1.1.0: 점프, 벽 타기, 2마리 이상이면 인사·잡기 놀이·하이파이브(몸으로)·부딪치기·붙어 앉기·기차놀이. 이 릴리스의 캐릭터 zip 으로 다시 설치하면 적용
+- 캐릭터 선택 행동: 점프(닿는 높이의 창 위로, 또는 작게 뛰기), 벽 타기(창 옆면을 올라 창 위로, 또는 화면 바깥 끝을 오르다 뛰어내리기). 캐릭터마다 `[activities]` 의 `jump`·`climb` 과 애니메이션으로 켠다
+- 개발 빌드는 데이터 폴더를 따로 쓴다 (`DesktopPet-Dev`)
+- 화면 관찰 상한: 시간당·하루 상한 0 = 무제한 (간격은 최소 1분), 동의·상태 창에 표시, 제한에서 무제한으로 바꾸면 다시 동의
+- 설정: 대화·화면 관찰의 기본 모델과 생각 깊이(effort), 펫끼리 대화의 effort 따로 (`reasoning.effort` 로 보내고, 모델이 받지 않으면 빼고 다시 보냄)
+- 펫끼리 상호작용 추가 (캐릭터 선택): 하이파이브, 부딪치면 튕기기, 붙어 앉기, 기차놀이, 페어 프로그래밍·코드 리뷰, 벽 타기 경주, 머리 위 올라타기(3층까지), 가끔 나타나는 버그 잡기 (`bump`·`lean`·`train`, `bug_hunt`, `highfive`·`lean`·`bug` 애니메이션)
+- 펫끼리 만나면 AI 로 한마디씩 주고받기 (설정, 기본 끔, 기본 10분 간격. 사용자 대화·화면 관찰에 양보, 음성으로 읽지 않음)
+- 캐릭터 선택: 행동 사이 짧은 쉼(`rest_between`), 같은 높이·낮은 창으로 건너뛰기와 떠 있는 창 옆면에 뛰어 붙기, 펫끼리 인사·잡기 놀이(`greet`, `follow`)
+
 ## 0.1.0 — first public release / 첫 공개
 
 - Desktop pets that walk on the desktop and on top of windows (Win32 + Direct3D 11 + DirectComposition), drag, click reactions, multiple pets, full-screen hiding

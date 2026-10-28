@@ -4,12 +4,13 @@
 #include <cmath>
 
 #include "diagnostics/log.h"
+#include "dp_version.h"
 
 namespace dp {
 
 namespace {
 uint64_t g_draws = 0;
-constexpr wchar_t kBubbleClass[] = L"DesktopPet.Bubble";
+constexpr wchar_t kBubbleClass[] = DP_CLASS_PREFIX L"Bubble";
 constexpr float kMaxWidth = 320, kFont = 14, kPadding = 9, kTail = 8;  // 96 DPI 기준
 
 LRESULT CALLBACK BubbleProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {

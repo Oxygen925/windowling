@@ -51,7 +51,9 @@ struct AiRequest {
     std::string imageDataUrl;           // 비지 않으면 마지막 user 항목에 이미지 첨부 ("data:image/jpeg;base64,…")
     std::string imageDetail = "low";
     std::string jsonSchemaName, jsonSchema;  // 비지 않으면 구조화 출력 (text.format json_schema, strict)
+    std::string reasoningEffort;        // 비지 않으면 reasoning.effort (모델이 거부하면 서비스가 빼고 한 번 더 보낸다)
 };
+
 std::string BuildResponsesRequest(const AiRequest& request);
 
 struct ModelInfo {

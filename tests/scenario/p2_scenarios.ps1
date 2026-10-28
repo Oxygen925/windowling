@@ -2,13 +2,10 @@
 # 사용자 config.toml 은 건드리지 않는다: 임시 폴더의 --config / --characters-dir 로 실행한다.
 # 실행 중 마우스가 자동으로 움직인다 (펫 클릭). PC를 만지지 않는다.
 param([string]$Preset = "x64-release")
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_LANGUAGE = "ko"; $env:DP_TEST_NO_WELCOME = "1"  # 시나리오: 화면 문구 한국어 고정, 환영 창 끔
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$pet = Join-Path $root "build\$Preset\desktop-pet.exe"
-$outDir = Join-Path $root ("logs\p2\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
+$Phase = "p2"
+. (Join-Path $PSScriptRoot "common.ps1")
 $tmp = Join-Path $env:TEMP ("dp_p2_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Force $outDir, $tmp | Out-Null
+New-Item -ItemType Directory -Force $tmp | Out-Null
 
 Add-Type -Namespace P2 -Name N -MemberDefinition @'
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindowW(string cls, System.IntPtr title);
@@ -22,31 +19,15 @@ Add-Type -Namespace P2 -Name N -MemberDefinition @'
 '@
 function CurMove($x, $y) { $null = [P2.N]::SetCursorPos($x, $y) }
 function CurClick($x, $y) { CurMove $x $y; Start-Sleep -Milliseconds 30; [P2.N]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [P2.N]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
-function PetWindows { $list = @(); $h = [IntPtr]::Zero; while ($true) { $h = [P2.N]::FindWindowExW([IntPtr]::Zero, $h, "DesktopPet.Pet", [IntPtr]::Zero); if ($h -eq [IntPtr]::Zero) { break }; $list += $h }; $list }
+function PetWindows { $list = @(); $h = [IntPtr]::Zero; while ($true) { $h = [P2.N]::FindWindowExW([IntPtr]::Zero, $h, "DesktopPetDev.Pet", [IntPtr]::Zero); if ($h -eq [IntPtr]::Zero) { break }; $list += $h }; $list }
 function ClickPet($hwnd) {
     $r = New-Object P2.N+RECT; $null = [P2.N]::GetWindowRect($hwnd, [ref]$r)
     CurClick ([int](($r.L + $r.R) / 2)) ([int]($r.T + ($r.B - $r.T) * 0.75))
     CurMove 2400 200  # 커서 근접(look) 영향 제거
 }
-function AppCommand($id) { $null = [P2.N]::PostMessageW([P2.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero), 0x111, [IntPtr]$id, [IntPtr]::Zero) }
+function AppCommand($id) { $null = [P2.N]::PostMessageW([P2.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero), 0x111, [IntPtr]$id, [IntPtr]::Zero) }
 
 # ---- 로그 ----
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null
-$script:mark = 0
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function WaitLog($pattern, $sec = 5) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-function All($pattern) { @(PetLines | Where-Object { $_ -match $pattern }) }
-function SinceMark($pattern) { @(PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern }) }
 function HwndOf($petId) {
     $l = All ("\[pet$petId\] spawn .*hwnd=0x([0-9A-F]+)") | Select-Object -Last 1
     if ($l -match "hwnd=0x([0-9A-F]+)") { return [IntPtr][Convert]::ToInt64($Matches[1], 16) }
@@ -54,22 +35,13 @@ function HwndOf($petId) {
 }
 function LibraryOrder { @(All "\[library\] loaded id=" | ForEach-Object { if ($_ -match "id=(\S+)") { $Matches[1] } } | Select-Object -Unique) }
 
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = $detail })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 
 # 실행 1회: 시작 → 로그 찾기 → $body 실행 → 106 종료
 function Session($name, [string[]]$petArgs, [scriptblock]$body) {
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $script:petLog = $null
     $p = Start-Process $pet -ArgumentList ($petArgs + @("--duration=120")) -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:mark = 0
     $null = WaitLog "시작: 펫" 8
     try { & $body $p }
@@ -275,7 +247,5 @@ try {
 finally {
     CurMove 2400 1300
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-    $results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-    $pass = @($results | Where-Object Pass).Count
-    Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+    Save-Results
 }

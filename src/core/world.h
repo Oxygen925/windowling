@@ -45,6 +45,9 @@ std::vector<IntervalI> SubtractIntervals(IntervalI a, std::vector<IntervalI> cut
 // 창 index 의 상단 노출 구간: Z-order상 위에 있는 창 중 상단 선을 세로로 덮는 창의 가로 범위를 뺀다
 std::vector<IntervalI> TopExposure(const WorldSnapshot& world, size_t index);
 
+// 창 index 의 세로선 x 중 ys 구간의 노출 부분: Z-order상 위에 있는 창 중 x 를 가로로 덮는 창의 세로 범위를 뺀다 (벽 타기)
+std::vector<IntervalI> SideExposure(const WorldSnapshot& world, size_t index, int32_t x, IntervalI ys);
+
 // 착지 가능한 표면 목록 (P1-D1, P1-D6)
 //  - 창 상단: 노출 구간마다 그 위 작업 영역까지의 여유 높이(headroom)를 기록한다. 펫 키보다 작으면 그 펫은 착지 불가
 //    (P2 보완: 펫마다 키가 다를 수 있어 표면을 한 키로 거르지 않는다). minHeadroom 보다 작은 구간은 아예 뺀다

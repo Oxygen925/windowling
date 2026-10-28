@@ -24,6 +24,10 @@ struct AiConfig {
     int firstTokenTimeoutSec = 120;     // 첫 응답 글자까지 대기 (추론이 긴 모델 고려)
     int requestTimeoutSec = 300;        // 요청 전체 (첫 응답 대기 포함). DevKit 기본값은 180초
     int callbackPort = 1455;            // OAuth 루프백 포트. 다시 로그인 때 사용 중이면 빈 포트로 (문서: 포트만 달라도 됨)
+    std::string reasoningEffort;        // 대화·관찰 요청의 reasoning.effort ("" = 보내지 않음 = 모델 기본값)
+    bool petChat = false;               // 펫끼리 만나면 AI 로 한마디씩 주고받기 (요청이 나가므로 기본 끔, 2026-10-20)
+    std::string petChatEffort = "low";  // 펫끼리 대화의 effort (짧은 한마디라 낮게)
+    int petChatIntervalMin = 10;        // 펫끼리 AI 대화 사이 최소 간격 (분)
     friend bool operator==(const AiConfig&, const AiConfig&) = default;
 };
 
@@ -32,8 +36,8 @@ struct AiConfig {
 struct ObserveConfig {
     int intervalMinMin = 15;         // 다음 시도까지 무작위 간격 (분)
     int intervalMaxMin = 30;
-    int maxPerHour = 2;              // 요청 전송 기준
-    int maxPerDay = 16;
+    int maxPerHour = 2;              // 요청 전송 기준. 0 = 무제한 (2026-10-22)
+    int maxPerDay = 16;              // 0 = 무제한
     int requireActivityMin = 5;      // 최근 입력이 이보다 오래되면(자리 비움) 관찰 안 함. 0 = 검사 안 함
     bool sendAppName = true;         // 전경 창 실행 파일 이름을 텍스트로 함께 보냄 (P4-R5)
     int imageMaxPx = 1024;           // 긴 변 (P4-R6)

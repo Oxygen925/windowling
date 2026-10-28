@@ -11,9 +11,9 @@ namespace dp::core {
 
 // 행동 결정 (FSM 기본값 또는 Lua 훅)
 struct BehaviorDecision {
-    std::string activity;  // idle / walk / sit / look
+    std::string activity;  // idle / walk / sit / look / jump / climb / follow / rest (jump·climb·follow 는 앱·물리가 가능할 때만)
     double durationSec = 1.0;
-    int walkDir = 0;       // walk 일 때 -1 / +1
+    int walkDir = 0;       // walk 일 때 -1 / +1, jump 일 때 -1 / 0 / +1
 };
 
 struct BehaviorContext {
@@ -53,6 +53,7 @@ public:
 
 private:
     BehaviorDecision DefaultRest();
+    double RestSec();  // rest_between × 0.8~1.5
     void Apply(const BehaviorDecision& d, double now);
 
     BehaviorDef def_;

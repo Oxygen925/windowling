@@ -24,13 +24,9 @@ namespace dp {
 
 namespace {
 
-constexpr wchar_t kAppClass[] = L"DesktopPet.App";
-constexpr wchar_t kPetClass[] = L"DesktopPet.Pet";
+constexpr wchar_t kAppClass[] = DP_CLASS_PREFIX L"App";
+constexpr wchar_t kPetClass[] = DP_CLASS_PREFIX L"Pet";
 constexpr UINT WM_TRAY = WM_APP + 1;
-constexpr double kNoDeadline = 1e300;
-
-enum DeadlineKey : core::Deadlines::Key { kDlCursor = 1, kDlBehavior, kDlResync, kDlEnd, kDlMetrics, kDlOrder, kDlBubble,
-                                           kDlRedraw };
 
 enum MenuId : UINT {
     ID_INFO = 100, ID_HIDE, ID_PAUSE, ID_OPEN_CONFIG, ID_OPEN_LOGS, ID_RESYNC, ID_EXIT,
@@ -38,8 +34,6 @@ enum MenuId : UINT {
     ID_ADD_BASE = 1000,   // + 캐릭터 index
     ID_SWAP_BASE = 2000,  // + 캐릭터 index
 };
-
-std::string Hex(core::WindowId id) { return std::format("0x{:X}", id); }
 
 std::filesystem::path ExeDir() {
     wchar_t exe[MAX_PATH];
@@ -69,7 +63,7 @@ int PetApp::Run(HINSTANCE instance, const core::Config& config, const std::files
     ui::LoadLanguage(config_.language);  // UI-01: 메뉴·창 문구 (로그는 번역하지 않음)
     ui::SetThemePreference(config_.theme);
     if (!CreateAppWindow()) return 3;
-    tray_.Add(appWnd_.get(), WM_TRAY, ui::T("tray.tip").c_str(), ui::AppIcon(true));
+    tray_.Add(appWnd_.get(), WM_TRAY, (ui::T("tray.tip") + DP_CHANNEL_SUFFIX).c_str(), ui::AppIcon(true));
     if (!WTSRegisterSessionNotification(appWnd_.get(), NOTIFY_FOR_THIS_SESSION))
         log::Warn("WTSRegisterSessionNotification 실패 err={}", GetLastError());
     if (!InitGpu()) return 3;
@@ -372,9 +366,9 @@ void PetApp::SetupBehavior(PetActor& pet) {
     pet.loggedLuaDisabled = false;
 }
 
-PetActor* PetApp::CreatePet(const std::shared_ptr<CharacterAsset>& asset, int slot, int slots) {
+PetActor* PetApp::CreatePet(const std::shared_ptr<CharacterAsset>& asset, int slot, int slots, int forcedId) {
     auto pet = std::make_unique<PetActor>();
-    pet->id = nextPetId_++;
+    pet->id = forcedId >= 0 ? forcedId : nextPetId_++;
     pet->asset = asset;
     const auto& world = physics_.World();
     // 시작 위치: 지정값 또는 주 모니터 작업 영역 위쪽에 고르게 나눠 떨어뜨린다
@@ -453,6 +447,7 @@ void PetApp::SwapCharacter(PetActor& pet, const std::shared_ptr<CharacterAsset>&
 void PetApp::ReloadCharacters() {
     std::vector<core::PetSpawn> list;
     for (auto& p : pets_) {
+        if (p->isBug) continue;  // 버그는 다시 띄우지 않는다
         if (!list.empty() && list.back().character == p->asset->pkg.id) list.back().count++;
         else list.push_back({p->asset->pkg.id, 1});
     }
@@ -489,6 +484,7 @@ void PetApp::OnWorldChanged(double now) {
         if (p->hiddenFullscreen || p->body.mode == core::BodyMode::Dragged) continue;
         LogBody(*p, physics_.Revalidate(p->body, ParamsFor(*p), now));
     }
+    SyncRiders();  // 창과 함께 움직인 펫 위의 펫도 따라간다
     ApplyFullscreen(now);  // 전경 창의 크기·위치 변화(게임의 전체화면 전환 등)도 판정 계기
 }
 
@@ -501,6 +497,12 @@ core::PhysicsParams PetApp::ParamsFor(const PetActor& pet) const {
     p.walkSpeed = b.walkSpeed * s;
     p.footSupportRatio = b.footSupportRatio;
     p.occlusionGraceSec = config_.occlusionGraceMs / 1000.0;
+    p.jumpHeight = b.jumpHeight * pet.body.height;  // 키의 배수 (body.height 는 DPI·배율 반영)
+    p.hopHeight = pet.body.height * 0.45;
+    p.climbSpeed = (b.climbSpeed > 0 ? b.climbSpeed : b.walkSpeed * 0.6) * s;
+    p.jumpReach = pet.body.width * 5.0;
+    if (pet.isBug) p.walkSpeed *= 1.8;  // 버그는 재빠르다
+    p.stepSec = clock_.StepSec();
     return p;
 }
 
@@ -513,22 +515,27 @@ void PetApp::StepPhysics(double now) {
         return;
     }
     const int steps = clock_.Advance(now);
-    for (int i = 0; i < steps; ++i)
+    std::vector<double> prevY(pets_.size());
+    for (int i = 0; i < steps; ++i) {
+        for (size_t k = 0; k < pets_.size(); ++k) prevY[k] = pets_[k]->body.foot.y;
         for (auto& p : pets_) {
             if (p->hiddenFullscreen) continue;
             LogBody(*p, physics_.Step(p->body, ParamsFor(*p), clock_.StepSec(), now));
         }
+        UpdateStacks(prevY, now);
+    }
 }
 
 void PetApp::LogBody(PetActor& pet, const std::vector<core::BodyEvent>& events) {
     for (const auto& e : events) {
-        static const char* kinds[] = {"Landed", "Detached", "Turned", "Relocated"};
+        static const char* kinds[] = {"Landed", "Detached", "Turned", "Relocated", "Jumped", "Climbing"};
         if (e.kind == core::BodyEvent::Kind::Turned) continue;  // 걷기 방향 전환은 기록하지 않음 (빈번)
         // 실행 파일 이름은 남기지 않는다 (앱 사용 이력이 로그에 쌓이지 않게, 보안 점검 2026-10-20)
         log::Info("[pet{}] event={} window={} reason={} foot=({:.0f},{:.0f})", pet.id, kinds[static_cast<int>(e.kind)],
                   Hex(e.window), e.reason, pet.body.foot.x, pet.body.foot.y);
         if (e.kind == core::BodyEvent::Kind::Landed && pet.fsm)
             pet.fsm->OnEvent("landed", Now(), pet.body.mode == core::BodyMode::Attached);
+        if (e.kind == core::BodyEvent::Kind::Jumped && e.reason == "wall end") OnClimbTop(pet);
     }
     if (pet.body.mode != pet.loggedMode || pet.body.host != pet.loggedHost) {
         log::Info("[pet{}] mode={} host={} localX={:.0f} foot=({:.0f},{:.0f})", pet.id, core::ToString(pet.body.mode),
@@ -554,67 +561,6 @@ void PetApp::UpdatePetSize(PetActor& pet) {
 }
 
 // ============================================================================
-// 행동 (P2: 패키지 FSM + Lua 훅)
-// ============================================================================
-
-void PetApp::UpdateBehavior(double now) {
-    double next = kNoDeadline;
-    for (auto& p : pets_) {
-        auto& b = p->body;
-        const bool resting = b.mode == core::BodyMode::Grounded || b.mode == core::BodyMode::Attached;
-        if (p->hiddenFullscreen) continue;
-        if (paused_ || options_.noBehavior) {
-            // 자율 결정만 막는다. 클릭 등 이벤트 반응(짧은 sit/look)은 끝날 때까지 두되 이동(walk)은 막는다
-            if (p->fsm->Activity() == "walk" || p->fsm->DecisionAt() <= now) p->fsm->Force({"idle", 3600.0, 0}, now);
-        } else if (options_.forceWalk && resting) {
-            if (p->fsm->Activity() != "walk" || p->fsm->DecisionAt() <= now) p->fsm->Force({"walk", 3600.0, 1}, now);
-        } else {
-            p->fsm->Update(now, resting, b.mode == core::BodyMode::Attached);
-        }
-        const bool walking = resting && p->fsm->Activity() == "walk";
-        if (!walking) b.walkDir = 0;
-        else if (b.walkDir == 0 || p->fsm->DecisionAt() != p->appliedDecisionAt) b.walkDir = p->fsm->WalkDir();
-        p->appliedDecisionAt = p->fsm->DecisionAt();
-        if (p->speaking) b.walkDir = 0;  // 말하는 동안은 멈춘다 (P3)
-        if (b.walkDir != 0) p->facingLeft = b.walkDir < 0;
-        if (p->fsm->Activity() != p->loggedActivity && resting) {
-            log::Info("[pet{}] act={} dir={} for={:.1f}s hooks={} rejected={}", p->id, p->fsm->Activity(), p->fsm->WalkDir(),
-                      p->fsm->DecisionAt() - now, p->fsm->HookDecisions(), p->fsm->RejectedHookDecisions());
-            p->loggedActivity = p->fsm->Activity();
-        }
-        if (resting) next = std::min(next, p->fsm->DecisionAt());
-        LogLua(*p);
-    }
-    if (next < kNoDeadline) deadlines_.Set(kDlBehavior, std::max(next, now + 0.001));
-    else deadlines_.Clear(kDlBehavior);
-}
-
-// Lua 런타임 오류(명령 수·메모리 제한 포함)와 비활성화를 기록한다
-void PetApp::LogLua(PetActor& p) {
-    if (!p.lua) return;
-    if (p.lua->Errors() != p.loggedLuaErrors) {
-        log::Warn("[pet{}] lua error count={} last={}", p.id, p.lua->Errors(), p.lua->LastError());
-        p.loggedLuaErrors = p.lua->Errors();
-    }
-    if (p.lua->Disabled() && !p.loggedLuaDisabled) {
-        log::Warn("[pet{}] lua disabled errors={} → 기본 FSM", p.id, p.lua->Errors());
-        p.loggedLuaDisabled = true;
-    }
-}
-
-std::string PetApp::ActionFor(const PetActor& p) const {
-    switch (p.body.mode) {
-        case core::BodyMode::Dragged: return "drag";
-        case core::BodyMode::Falling: return "fall";
-        default: break;
-    }
-    if (p.speaking) return "talk";  // 없으면 AnimationPlayer 가 idle 로 대체
-    const std::string& act = p.fsm->Activity();
-    if (p.cursorNear && act != "walk") return "look";
-    return act;
-}
-
-// ============================================================================
 // 설정 반영 (UI-07). 바로 반영할 수 있는 항목은 여기서, 아니면 "다시 시작 필요" 목록으로 돌려준다.
 // 관찰·AI 시간 제한·말풍선·이력·전체화면 예외는 쓸 때마다 config_ 를 읽어 따로 할 일이 없다.
 // ============================================================================
@@ -637,6 +583,8 @@ std::vector<std::wstring> PetApp::ApplyConfig(const core::Config& old) {
     if (!old.updateCheck && config_.updateCheck) ScheduleUpdateCheck(5);
     if (!old.proximityReaction && config_.proximityReaction) deadlines_.Set(kDlCursor, now);
     if (old.ai.hotkey != config_.ai.hotkey) ReRegisterAiHotkey();
+    if (!old.ai.petChat && config_.ai.petChat) RequestModelsIfNeeded();  // 펫끼리 대화를 켜면 모델 목록을 미리
+    if (old.ai.model != config_.ai.model && !models_.empty()) SelectDefaultModel();  // 기본 모델이 바뀌면 지금 고른 모델도
     if (TurnOffIfScopeWidened("settings")) notices_.push_back(ui::T("settings.observe_rescoped"));
     if (observeOn_ && (old.observe.intervalMinMin != config_.observe.intervalMinMin ||
                        old.observe.intervalMaxMin != config_.observe.intervalMaxMin))
@@ -1067,7 +1015,7 @@ LRESULT PetApp::PetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 clock_.Reset(Now());
             }
             return 0;
-        case WM_RBUTTONUP: ShowMenu(p); return 0;
+        case WM_RBUTTONUP: ShowMenu(p && p->isBug ? nullptr : p); return 0;  // 버그는 메뉴 대상이 아님
         case WM_DPICHANGED: observer_.MarkMonitorsDirty(); return 0;  // 크기는 발 위치 모니터 DPI로 다시 계산
         case WM_ERASEBKGND: return 1;
         case WM_PAINT: {
@@ -1103,7 +1051,9 @@ LRESULT PetApp::AppProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_HOTKEY:
             if (wp == 1) {
                 PetActor* t = PetById(lastPetId_);
-                if (!t && !pets_.empty()) t = pets_.front().get();
+                if (!t || t->isBug) t = nullptr;
+                for (auto& p : pets_)
+                    if (!t && !p->isBug) t = p.get();
                 log::Info("[ai] hotkey → chat pet={}", t ? t->id : -1);
                 OpenChat(t);
             }
@@ -1124,12 +1074,12 @@ LRESULT PetApp::AppProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_COMMAND: {
             const UINT id = LOWORD(wp);
             // 메뉴 대상: 우클릭한 펫, 없으면 마지막 펫
-            PetActor* target = menuTarget_ ? menuTarget_ : (pets_.empty() ? nullptr : pets_.back().get());
+            PetActor* target = menuTarget_ ? menuTarget_ : LastRealPet();
             if (id >= ID_ADD_BASE && id < ID_ADD_BASE + libraryOrder_.size()) {
-                if (static_cast<int>(pets_.size()) >= core::Config::kMaxPets) {
+                if (static_cast<int>(RealPetCount()) >= core::Config::kMaxPets) {
                     log::Warn("[pets] 최대 {}마리 — 추가하지 않음", core::Config::kMaxPets);
                 } else {
-                    CreatePet(library_[libraryOrder_[id - ID_ADD_BASE]], static_cast<int>(pets_.size()), core::Config::kMaxPets);
+                    CreatePet(library_[libraryOrder_[id - ID_ADD_BASE]], static_cast<int>(RealPetCount()), core::Config::kMaxPets);
                 }
             } else if (id >= ID_SWAP_BASE && id < ID_SWAP_BASE + libraryOrder_.size()) {
                 if (target) SwapCharacter(*target, library_[libraryOrder_[id - ID_SWAP_BASE]]);
@@ -1174,6 +1124,15 @@ LRESULT PetApp::AppProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     case ID_EXIT: PostQuitMessage(0); break;
                     case 9000:  // 시나리오 전용: GPU 재생성 강제 (--test-hooks 일 때만)
                         if (options_.testHooks) RecreateGpu("test");
+                        break;
+                    case 9003:  // 시나리오 전용: 지금 버그 등장
+                        if (options_.testHooks) SpawnBug(Now());
+                        break;
+                    case 9002:  // 시나리오 전용: 펫 0·1 이 거리와 무관하게 인사 (펫끼리 AI 대화 간격도 초기화)
+                        if (options_.testHooks && pets_.size() >= 2) {
+                            lastPetChatAt_ = -1e9;
+                            GreetPair(*pets_[0], *pets_[1], Now());
+                        }
                         break;
                     default: OnObserveCommand(id); break;
                 }
@@ -1224,14 +1183,14 @@ void PetApp::ShowMenu(PetActor* target) {
         item(menu, MF_STRING, ID_CHARACTERS, ui::T("menu.characters"));
         item(menu, MF_STRING, ID_SETTINGS, ui::T("menu.settings"));
     } else {  // 트레이
-        item(menu, MF_STRING | MF_GRAYED, ID_INFO, ui::TF("menu.info", std::wstring(DP_VERSION_WSTRING), pets_.size(), library_.size()));
+        item(menu, MF_STRING | MF_GRAYED, ID_INFO, ui::TF("menu.info", std::wstring(DP_VERSION_WSTRING), RealPetCount(), library_.size()));
         if (updateAvailable_) item(menu, MF_STRING, ID_UPDATE, ui::TF("update.menu", ToWide(updateAvailable_->version)));
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         if (aiEnabled_) item(menu, MF_STRING | petFlags, ID_CHAT, ui::T("menu.chat"));
         HMENU pets = CreatePopupMenu(), add = CreatePopupMenu();
         for (size_t i = 0; i < libraryOrder_.size(); ++i)
             item(add, MF_STRING, ID_ADD_BASE + i, ToWide(library_[libraryOrder_[i]]->pkg.name));
-        const UINT addFlags = libraryOrder_.empty() || static_cast<int>(pets_.size()) >= core::Config::kMaxPets ? MF_GRAYED : 0;
+        const UINT addFlags = libraryOrder_.empty() || static_cast<int>(RealPetCount()) >= core::Config::kMaxPets ? MF_GRAYED : 0;
         item(pets, MF_POPUP | addFlags, reinterpret_cast<UINT_PTR>(add), ui::T("menu.add"));
         item(pets, MF_POPUP | petFlags, reinterpret_cast<UINT_PTR>(swap), ui::T("menu.swap_last"));
         item(pets, MF_STRING | petFlags, ID_REMOVE, ui::T("menu.remove_last"));

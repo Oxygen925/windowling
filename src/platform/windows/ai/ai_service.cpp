@@ -179,15 +179,17 @@ uint64_t AiService::Send(int petId, ai::AiRequest request, size_t maxChars, Stre
     if (const uint64_t a = activeRequest_.load()) Cancel(a);
     const uint64_t id = nextRequest_++;
     activeRequest_ = id;
-    Enqueue([this, id, petId, request = std::move(request), maxChars, timeouts] {
+    Enqueue([this, id, petId, request = std::move(request), maxChars, timeouts]() mutable {
         auto done = std::make_unique<AiEvent>();
         done->kind = AiEvent::Kind::StreamDone;
         done->requestId = id;
         done->petId = petId;
-        client_->BeginRequest();
-        if (activeRequest_ != id) {  // 큐에서 기다리는 동안 취소됨
-            done->stream.outcome = StreamOutcome::Cancelled;
-        } else {
+        for (int pass = 0; pass < 2; ++pass) {
+            client_->BeginRequest();
+            if (activeRequest_ != id) {  // 큐에서 기다리는 동안 취소됨
+                done->stream.outcome = StreamOutcome::Cancelled;
+                break;
+            }
             done->stream = client_->Stream(request, maxChars, timeouts, [&](std::string_view delta) {
                 auto d = std::make_unique<AiEvent>();
                 d->kind = AiEvent::Kind::Delta;
@@ -196,6 +198,15 @@ uint64_t AiService::Send(int petId, ai::AiRequest request, size_t maxChars, Stre
                 d->text = std::string(delta);
                 Post(std::move(d));
             });
+            const auto& r = done->stream;
+            // 고른 effort 를 이 모델이 받지 않음 (글자를 받기 전 400) → effort 없이 한 번 더
+            if (r.outcome == StreamOutcome::Failed && r.http == 400 && r.chars == 0 && !request.reasoningEffort.empty() &&
+                r.param.rfind("reasoning", 0) == 0) {
+                request.reasoningEffort.clear();
+                done->effortRejected = true;
+                continue;
+            }
+            break;
         }
         uint64_t expected = id;
         activeRequest_.compare_exchange_strong(expected, 0);
@@ -249,6 +260,7 @@ uint64_t AiService::Observe(ObserveJob job) {
         for (int pass = 0; pass < 2; ++pass) {
             auto request = ai::BuildObserveRequest(job.model, job.instructions, job.context, dataUrl, job.structured,
                                                    job.maxSpeechChars, job.behaviors);
+            request.reasoningEffort = job.reasoningEffort;
             client_->BeginRequest();
             if (activeRequest_ != id) {
                 done->stream.outcome = StreamOutcome::Cancelled;
@@ -260,6 +272,11 @@ uint64_t AiService::Observe(ObserveJob job) {
             SecureZeroMemory(request.imageDataUrl.data(), request.imageDataUrl.size());
             const auto& r = done->stream;
             const bool badRequest = r.outcome == StreamOutcome::Failed && r.http == 400;
+            if (badRequest && !job.reasoningEffort.empty() && r.param.rfind("reasoning", 0) == 0) {
+                job.reasoningEffort.clear();  // effort 거부 → 빼고 한 번 더
+                done->effortRejected = true;
+                continue;
+            }
             if (badRequest && job.structured && r.param.rfind("text", 0) == 0) {
                 job.structured = false;  // 구조화 출력 거부 → 안내문 JSON 으로 한 번 더
                 done->structuredRejected = true;

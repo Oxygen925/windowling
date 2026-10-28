@@ -6,9 +6,11 @@
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <map>
 #include <unordered_map>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,8 @@
 #include "update_checker.h"
 #include "cost_meter.h"
 #include "core/behavior/fsm.h"
+#include "ai/pet_chat.h"
+#include "core/behavior/social.h"
 #include "core/character/animation.h"
 #include "core/character/package.h"
 #include "core/config.h"
@@ -58,6 +62,12 @@ enum ObserveMenuId : UINT {
     ID_UPDATE,                                // 새 버전 내려받기 페이지 (124, P6-03)
 };
 inline constexpr core::Deadlines::Key kDlObserveKey = 100;  // 다음 관찰 시도 또는 캡처 제외 안전망
+// 메인 루프 마감 키 (pet_app*.cpp 공용)
+enum DeadlineKey : core::Deadlines::Key { kDlCursor = 1, kDlBehavior, kDlResync, kDlEnd, kDlMetrics, kDlOrder, kDlBubble,
+                                           kDlRedraw };
+inline constexpr double kNoDeadline = 1e300;
+// 창 ID 로그 표시 (실행 파일 이름 대신)
+inline std::string Hex(core::WindowId id) { return std::format("0x{:X}", id); }
 
 struct LaunchOptions {
     int pets = 0;                 // >0 이면 설정의 [[pets]] 대신 이 마릿수 (개발·테스트용)
@@ -70,6 +80,7 @@ struct LaunchOptions {
     bool noBehavior = false;      // 자동 행동 끔 (시나리오 테스트에서 위치 고정)
     bool noRegionCache = false;   // R1 비교 측정용: Region 캐시 끄기
     bool forceWalk = false;       // 계속 걷기 (성능 측정)
+    std::string forceActivity;    // 시험 전용: 쉴 때마다 이 행동 (jump·climb 확인)
     std::wstring metricsCsv;      // 지정 시 1초 간격 성능 CSV
     int durationSec = 0;          // >0 이면 자동 종료 (측정용)
     // AI (P3, 테스트 전용 인자): 설정과 무관하게 켬 / 모의 서버 주소(127.0.0.1 만) / 브라우저 대신 인가 URL 기록
@@ -135,6 +146,9 @@ struct CharacterAsset {
     }
 };
 
+// 따라가기 종류: 잡기 놀이(닿으면 잡음) · 기차놀이(한 칸 띄워 따라감) · 붙어 앉으러 감 · 코딩하는 친구 옆으로 (페어 프로그래밍)
+enum class FollowMode { Tag, Train, Lean, Visit };
+
 struct PetActor {
     int id = 0;
     std::shared_ptr<CharacterAsset> asset;
@@ -145,6 +159,23 @@ struct PetActor {
     bool cursorNear = false;    // 커서 근접 (near 는 windows.h 매크로)
     std::string loggedActivity;
     double appliedDecisionAt = -1;  // 걷기 방향은 새 결정 때만 적용 (가장자리 반전은 물리가 한다)
+    std::mt19937 rng{0x5eed};       // 점프 목표 고르기 (창 위로 / 작게), 인사 문구
+    int followTarget = -1;          // 따라가는 펫 id (-1 = 없음)
+    FollowMode followMode = FollowMode::Tag;
+    // 페어 프로그래밍: 들여다보는 펫(visitor) 쪽에 단계·시각을 둔다. 코딩하는 펫은 pairWith 만
+    int pairWith = -1, pairStage = 0;
+    bool pairCoder = false, pairAi = false;
+    double pairAt = 0;
+    int raceWith = -1;              // 벽 타기 경주 상대 (-1 = 없음)
+    // 올라타기 (탑 쌓기): mountId = 내가 올라탄 펫, riderId = 내 머리 위 펫, stackTarget = 뛰어오르는 중인 목표
+    int mountId = -1, riderId = -1, stackTarget = -1;
+    // 버그 잡기: 버그도 펫처럼 움직이고 그려지지만 메뉴·마릿수·관찰·AI·다시 띄우기에서는 빠진다 (id 1000~)
+    bool isBug = false, bugDead = false;
+    double bugUntil = 0;
+    double rideUntil = 0;
+    double raceUntil = 0;
+    double followUntil = 0, followJumpAt = 0;
+    bool tagBack = false;           // 잡힌 뒤 되잡으러 가는 중 (한 번만)
     uint64_t loggedLuaErrors = 0;
     bool loggedLuaDisabled = false;
     uint32_t dpi = 96;
@@ -200,7 +231,7 @@ private:
     void LoadCharacters();  // LoadLibrary 는 Win32 매크로라 피함
     std::vector<core::PetSpawn> SpawnList() const;
     void SpawnPets(const std::vector<core::PetSpawn>& list);
-    PetActor* CreatePet(const std::shared_ptr<CharacterAsset>& asset, int slot, int slots);
+    PetActor* CreatePet(const std::shared_ptr<CharacterAsset>& asset, int slot, int slots, int forcedId = -1);
     void SetupBehavior(PetActor& pet);
     void RemovePet(PetActor* pet);
     void SwapCharacter(PetActor& pet, const std::shared_ptr<CharacterAsset>& asset);
@@ -223,6 +254,61 @@ private:
     // 펫
     core::PhysicsParams ParamsFor(const PetActor& pet) const;
     std::string ActionFor(const PetActor& pet) const;
+    void StartJumpOrClimb(PetActor& pet, double now);
+    static std::wstring LimitText(int limit);
+    void StartFollow(PetActor& pet, double now);
+    void StartFollowing(PetActor& pet, PetActor& target, FollowMode mode, double seconds, double now);
+    void StartTrain(PetActor& leader, double now);
+    void Caught(PetActor& me, PetActor& target, double now);
+    void LeanTogether(PetActor& me, PetActor& target, double now);
+    void BumpPair(PetActor& a, PetActor& b, double now);
+    void StartVisit(PetActor& visitor, double now);
+    void StartPairSession(PetActor& visitor, PetActor& coder, double now);
+    void UpdatePairs(double now);
+    void EndPair(PetActor& visitor);
+    void StartRace(PetActor& me, double now);
+    void OnClimbTop(PetActor& pet);  // 화면 끝 꼭대기에서 뛰어내림 (경주 판정)
+    void StartStack(PetActor& me, double now);
+    void MountOn(PetActor& rider, PetActor& mount, double now);
+    void HopOff(PetActor& rider, double now);
+    void Dismount(PetActor& rider);  // 아래 펫이 사라지거나 움직여 떨어짐
+    // 물리 한 스텝 뒤: 뛰어오르던 펫이 머리 높이를 지났으면 올라태우고, 올라탄 펫 위치를 아래 펫에 맞춘다 (아래부터)
+    void UpdateStacks(const std::vector<double>& prevFootY, double now);
+    // 버그 잡기
+    double NextBugCheck(double now);   // 다음 버그 등장 시각 (사냥할 펫이 없으면 kNoDeadline)
+    bool SpawnBug(double now);
+    void UpdateBug(PetActor& bug, double now);
+    void CatchBug(PetActor& hunter, PetActor& bug, double now);
+    void SweepBugs();                  // 잡혔거나 도망친 버그를 지운다 (루프 밖에서)
+    size_t RealPetCount() const;       // 버그를 뺀 펫 수
+    PetActor* LastRealPet();
+    double nextBugAt_ = -1;
+    std::mt19937 bugRng_{0xb06};
+    int nextBugId_ = 1000;
+    void SyncRiders();
+    void UpdateSocial(double now);  // 인사·따라가기 (UpdateBehavior 끝에서)
+    void GreetPair(PetActor& a, PetActor& b, double now);
+    void SayFixed(PetActor& pet, const char* keyPrefix, int count, double now, double seconds);
+    core::GreetBook greetBook_, bumpBook_, leanBook_;
+    // 펫끼리 AI 대화 (설정 ai.pet_chat). 사용자 대화(activeReq_)·관찰과 따로 추적하고, 대화 이력(conv)에 넣지 않는다
+    struct PetChat {
+        uint64_t req = 0;
+        int a = -1, b = -1;  // a 가 먼저 말하고 b 가 답한다
+        int stage = 0;       // 1 = a 의 말 받는 중, 2 = b 의 답 받는 중
+        std::string reply;
+    } petChat_;
+    double lastPetChatAt_ = -1e9;
+    // 모델 목록이 없으면 한 번만 요청 (AI 켬·로그인·플랜 사용 가능일 때). 요청했으면 true
+    bool RequestModelsIfNeeded();
+    // 설정의 기본 모델(없으면 첫 모델)을 고르고 대화창 목록에 반영. 고른 index (없으면 -1)
+    int SelectDefaultModel();
+    // speaker 의 펫끼리 한마디 요청 (otherLine 이 비면 먼저 말 걸기). 말풍선 "…" 를 띄우고 요청 id 를 돌려준다
+    uint64_t SendPetChatLine(PetActor& speaker, const PetActor& other, const std::string& otherLine, ai::PetChatSituation situation);
+    const char* PetChatBlock(double now);  // 지금 펫끼리 AI 대화를 못 하는 이유 (nullptr = 할 수 있음)
+    bool TryPetChat(PetActor& a, PetActor& b, double now, ai::PetChatSituation situation);  // 할 수 있으면 시작, 아니면 이유를 로그
+    void StartPetChat(PetActor& a, PetActor& b, double now, ai::PetChatSituation situation);
+    void OnPetChatDone(const AiEvent& e, double now);
+    void EndPetChat(double now);
     RECT RectFor(const PetActor& pet) const;
     void UpdatePetSize(PetActor& pet);
     void LogBody(PetActor& pet, const std::vector<core::BodyEvent>& events);

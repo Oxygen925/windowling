@@ -14,7 +14,7 @@ namespace dp::ai {
 
 // ---- 동의 범위 (보안 점검 2026-10-20): 동의할 때 보여 준 값. 이보다 넓어지면 관찰을 끄고 다시 동의를 받는다 ----
 struct ObserveScope {
-    int maxPerHour = 2, maxPerDay = 16;
+    int maxPerHour = 2, maxPerDay = 16;  // 0 = 무제한
     int intervalMinMin = 15, intervalMaxMin = 30;
     int requireActivityMin = 5;  // 0 = 자리 비움 검사 안 함 (가장 넓음)
     int imageMaxPx = 1024;

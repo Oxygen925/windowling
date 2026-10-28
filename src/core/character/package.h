@@ -32,8 +32,15 @@ struct ActivityDef {
 struct BehaviorDef {
     double walkSpeed = 70.0;        // px/s @96DPI
     double footSupportRatio = 0.5;  // P1-D1
-    bool climb = false;             // P2-R5: 예약 (동작 미구현)
-    std::map<std::string, ActivityDef> activities;  // idle / walk / sit
+    double jumpHeight = 2.5;        // 더 높은 창 위로 뛸 때 최대 높이 (펫 키의 배수)
+    double climbSpeed = 0;          // 벽 오르기 속도 px/s @96DPI (0 = walk_speed × 0.6)
+    double restBetween = 0;         // 행동과 행동 사이에 가만히 서 있는 시간 (초, 0 = 없음). 실제는 0.8~1.5배
+    bool greet = false;             // 다른 펫과 마주치면 인사 (말풍선). highfive 애니메이션이 있으면 가끔 하이파이브
+    bool bump = false;              // 걷다 마주치면 서로 튕겨 물러남
+    bool lean = false;              // 둘 다 앉아 있으면 다가가 붙어 앉음
+    double headHeight = 0.8;        // 머리 꼭대기 높이 (키의 비율, 발에서). 다른 펫이 올라탈 자리
+    bool bugHunt = false;           // 가끔 나타나는 버그를 쫓아가 잡음 (bug 애니메이션이 있어야 버그가 나타남)
+    std::map<std::string, ActivityDef> activities;  // idle / walk / sit / jump / climb / follow / train / visit / race / stack
     std::filesystem::path script;   // 비어 있으면 Lua 없음
     std::string scriptSource;       // 로드된 Lua 소스
 };
@@ -65,6 +72,10 @@ struct CharacterPackage {
     SpriteDef sprite;     // renderers 에 "sprite" 일 때
     ModelDef model;       // renderers 에 "gltf" 일 때 (P5). 둘 다 있으면 모델 우선
     bool IsModel() const { return !model.path.empty(); }
+    // 그 행동의 애니메이션이 있는가 (모델은 [model.animations], 스프라이트는 [animations])
+    bool HasClip(const std::string& action) const {
+        return IsModel() ? model.animations.contains(action) : sprite.clips.contains(action);
+    }
     BehaviorDef behavior;
     std::string persona;  // persona.md (선택, P3): AI 대화의 성격·말투. 권한에는 영향 없음
     VoiceDef voice;       // manifest [voice] (선택, P4)
@@ -90,6 +101,8 @@ struct PackageLoadResult {
 
 // 공통 행동 이름 (기준선 §5.1 + 근접·클릭 반응 look)
 const std::vector<std::string>& CommonActions();
+// 선택 행동 애니메이션: 없어도 되고, 있으면 쓴다 (jump 가 없으면 fall, climb 이 없으면 벽 타기를 하지 않음)
+const std::vector<std::string>& OptionalActions();
 
 // root 아래 상대 경로를 정규화해 root 안에 있으면 절대 경로를 돌려준다.
 // 절대 경로, 드라이브 지정, '..' 로 밖으로 나가는 경로는 거부 (기준선 §6.2 경로 정규화)

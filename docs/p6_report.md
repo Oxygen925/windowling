@@ -86,7 +86,8 @@ P6 앞에 한 보안 점검(High 2·Medium 7·Low 9, [보안 점검](security_re
 3. 저장소 설정: 비공개 취약점 신고(Security) 켜기, Actions 권한 확인, 기본 브랜치 master.
 4. CI 통과 확인 → `v0.1.0` 태그 → 릴리스 초안 확인 (자산 7개·`latest.json` 주소가 공개 저장소) → 공개.
 5. 공개 뒤: `releases/latest/download/latest.json` 리디렉션·앱의 업데이트 확인(같은 버전이라 알림 없음)·README 의 링크 확인.
-6. 이후 개발: 비공개 `windowling-dev` 에서 하고, 공개 저장소에는 릴리스마다 정리한 커밋을 올린다 (방식은 그때 결정).
+6. 이후 개발: 비공개 `windowling-dev` 에서 하고, 공개 저장소에는 릴리스마다 정리한 커밋을 올린다.
+   - 2026-10-20 결정: 공개 `master` 위에 릴리스마다 커밋 1개 (강제 push 없음), `tools/release/publish_public.ps1` (Prepare·Push·Tag). 개발 빌드는 별도 데이터 폴더 `DesktopPet-Dev` (`DP_DEV_CHANNEL`). [개발용·배포용 분리와 릴리스 절차](release_process_ko.md).
 
 **진행 (2026-10-20)**
 - 1~3 완료: 비공개 저장소는 `Oxygen925/windowling-dev` (로컬 `origin`), 공개 저장소 `Oxygen925/windowling` (로컬 `public`) 에 `public-release`(커밋 `018fafd`) 를 `master` 로 올림. 기본 브랜치 master, 비공개 취약점 신고 켬.
@@ -94,4 +95,6 @@ P6 앞에 한 보안 점검(High 2·Medium 7·Low 9, [보안 점검](security_re
   - 확인: 자산 7개, ZIP 3개 SHA-256 이 `.sha256` 와 일치, `latest.json` page = `https://github.com/Oxygen925/windowling/releases/tag/v0.1.0`, 실행 파일에 저장소 이름 `Oxygen925/windowling` 이 들어감, ZIP 13개 항목.
   - **초안 공개는 사용자 결정으로 보류.** 공개하면 5 를 진행한다.
 - 예제 캐릭터 교체 (사용자 결정): `test-orange`·`test-blue` 대신 아이콘 기반 마스코트 `windowling`(MIT, 128px 11프레임, 눈 깜빡임·talk 입 모양) 하나를 릴리스에 올리고, 기본 설정의 펫도 `windowling` 으로 바꿈. core 단위 테스트 73개·P1 시나리오 12/12(펫 `windowling`) 통과. 공개 저장소는 커밋 1개로 다시 만들고 초안·태그를 지운 뒤 다시 태그한다.
+- **공개 완료 (2026-10-20 20:19 KST, 사용자 결정):** 공개 커밋 `a648677` → CI(run 39413238494) 통과 → 태그 `v0.1.0` → Release(run 39413664911) 초안 확인(자산 5개, ZIP 2개 SHA-256 일치, `latest.json` page 공개 저장소, 실행 파일의 저장소 이름 `Oxygen925/windowling`) → 공개 (`--latest`).
+  - 5 확인: `releases/latest/download/latest.json`·본 ZIP 이 302 → 200 으로 받아짐. 앱 업데이트 확인 `check ok latest=0.1.0 current=0.1.0 newer=false`. README 의 저장소 안 링크 7개 존재. 외부 링크 openai.com 은 curl 에 403(봇 차단으로 보임, 브라우저 확인 안 함).
 - 주의: 공개 저장소에 다시 올릴 때는 `public-release` 를 그때의 master 로 새로 만든다 (지금 master 의 이 문서 변경은 공개 커밋에 없음).

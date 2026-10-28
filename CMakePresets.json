@@ -57,6 +57,7 @@
         "VCPKG_TARGET_TRIPLET": "x64-windows-static",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
         "DP_TEST_HOOKS": "OFF",
+        "DP_DEV_CHANNEL": "OFF",
         "DP_DEV_CHARACTERS": "OFF",
         "DP_BUILD_TOOLS": "OFF"
       }

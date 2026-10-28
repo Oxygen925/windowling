@@ -12,7 +12,7 @@
   - `on_rest(ctx)`
   - `on_event(name, ctx)`. `name` 은 click·landed·drag_start·drag_end·cursor_near 중 하나
   - `ctx` 는 `{now, mode, last}` 를 담는다.
-  - 결과는 C++ 쪽에서 다시 검증한다. activity 는 idle/walk/sit/look, duration 은 0.1~60초, walk 일 때만 dir ±1. 검증을 통과하지 못하면 버린다 (`rejected` 카운트).
+  - 결과는 C++ 쪽에서 다시 검증한다. activity 는 idle/walk/sit/look/jump/climb (jump·climb 은 2026-10-20 추가, ADR-13), duration 은 0.1~60초, walk 일 때 dir ±1, jump 일 때 -1/0/+1. 검증을 통과하지 못하면 버린다 (`rejected` 카운트).
 - 샌드박스 (P2-R4):
   - 텍스트 청크만 로드한다 (`"t"`). 바이트코드는 거부한다.
   - 허용 라이브러리: `base`·`table`·`string`·`math`.

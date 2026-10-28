@@ -1,5 +1,6 @@
-# 128x128 프레임 11개 가로 배열 (tools/assets/gen_windowling_sprite.ps1)
-#   0 idle, 1 깜빡임, 2 걷기 기본, 3 왼발 듦, 4 오른발 듦, 5 sit, 6 fall, 7 drag, 8 look, 9~10 talk
+# 128x128 프레임 18개 가로 배열 (tools/assets/gen_windowling_sprite.ps1)
+#   0 idle, 1 깜빡임, 2 걷기 기본, 3 왼발 듦, 4 오른발 듦, 5 sit, 6 fall, 7 drag, 8 look, 9~10 talk,
+#   11 jump, 12~14 climb (벽이 오른쪽), 15~16 highfive, 17 lean
 frame_width = 128
 frame_height = 128
 
@@ -11,3 +12,7 @@ fall = { frames = [6], fps = 1 }
 drag = { frames = [7], fps = 1 }
 look = { frames = [8], fps = 1 }
 talk = { frames = [9, 10, 9, 0], fps = 6 }  # 말하는 동안 (P3)
+jump     = { frames = [11], fps = 1 }
+climb    = { frames = [12, 13, 14, 13], fps = 6 }
+highfive = { frames = [15, 15, 16, 16, 16], fps = 6 }  # 웅크렸다가 → 폴짝 (팔 대신 몸으로)
+lean     = { frames = [17], fps = 1 }                 # 붙어 앉기

@@ -3,6 +3,8 @@
 // "적용" = 값 검사(숫자 → 설정 파일 범위 검사) → 콜백(PetApp 이 설정 파일 저장 + 즉시 반영). 화면 관찰 켜고 끄기는 여기 없다 (동의 필요).
 // 컨트롤 ID 는 시험 스크립트가 쓰므로 바꾸지 않는다.
 #include <functional>
+#include <utility>
+#include <vector>
 #include <string>
 
 #include "core/config.h"
@@ -21,6 +23,8 @@ enum SettingsControlId {
     // AI 대화 (7xx)
     IDC_SET_AI_ENABLED = 701, IDC_SET_HOTKEY_L, IDC_SET_HOTKEY, IDC_SET_HOTKEY_HINT, IDC_SET_BUBBLE_L, IDC_SET_BUBBLE,
     IDC_SET_HISTORY_L, IDC_SET_HISTORY, IDC_SET_FIRST_L, IDC_SET_FIRST, IDC_SET_REQUEST_L, IDC_SET_REQUEST, IDC_SET_AI_NOTE,
+    IDC_SET_PET_CHAT, IDC_SET_PET_CHAT_L, IDC_SET_PET_CHAT_MIN, IDC_SET_PET_CHAT_NOTE,
+    IDC_SET_MODEL_L, IDC_SET_MODEL, IDC_SET_EFFORT_L, IDC_SET_EFFORT, IDC_SET_PET_EFFORT_L, IDC_SET_PET_EFFORT, IDC_SET_MODEL_NOTE,
     // 화면 관찰 (8xx)
     IDC_SET_OBS_NOTE = 801, IDC_SET_INTERVAL_L, IDC_SET_INTERVAL_MIN, IDC_SET_INTERVAL_SEP, IDC_SET_INTERVAL_MAX,
     IDC_SET_PER_HOUR_L, IDC_SET_PER_HOUR, IDC_SET_PER_DAY_L, IDC_SET_PER_DAY, IDC_SET_AWAY_L, IDC_SET_AWAY, IDC_SET_SEND_APP,
@@ -45,6 +49,8 @@ struct SettingsCallbacks {
     std::function<void()> openFile;
     std::function<bool()> startupEnabled;
     std::function<void()> wipe;  // 모든 데이터 지우기 (P6-04, 확인은 PetApp 이 한다)
+    // 로그인한 계정의 모델 목록 (slug, 표시 이름). 비어 있으면 지금 설정 값만 보여 준다
+    std::function<std::vector<std::pair<std::string, std::wstring>>()> models;
 };
 
 class SettingsWindow : public ui::AppWindow {
@@ -52,6 +58,7 @@ public:
     enum Page { kGeneral = 0, kAi, kObserve, kTts, kPageCount };
     // 없으면 current 값으로 만들고, 있으면 그 영역으로 넘기고 앞으로
     void Show(const core::Config& current, Page page, SettingsCallbacks callbacks);
+    void ModelsChanged();  // 모델 목록이 도착하면 고르기 칸을 다시 채운다 (지금 고른 값 유지)
 
 protected:
     void OnCreate() override;
@@ -67,6 +74,8 @@ private:
     void FillCombos();
     void Fill(const core::Config& c);
     bool Read(core::Config& out, int& badId) const;  // 숫자로 못 바꾸는 칸이 있으면 false
+    std::vector<std::string> modelSlugs_;  // 모델 고르기 칸의 항목 순서 ("" = 목록의 첫 모델)
+    void FillModels(const std::string& current);
     void Apply();
     void SetStatus(const std::wstring& text);
 

@@ -3,15 +3,10 @@
 #       TTS 확인 때 짧은 음성이 1번 재생된다. 제외 앱 확인용 테스트 창(dpexcl.exe = 복사한 powershell)을 잠깐 띄운다.
 #       사용자 프로그램은 제외 목록에 넣거나 종료하지 않는다. PC 를 만지지 않는다.
 param([string]$Preset = "x64-release", [switch]$KeepDump)
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_LANGUAGE = "ko"; $env:DP_TEST_NO_WELCOME = "1"  # 시나리오: 화면 문구 한국어 고정, 환영 창 끔
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$bin = Join-Path $root "build\$Preset"
-$pet = Join-Path $bin "desktop-pet.exe"
-$mockExe = Join-Path $bin "mock-siwc.exe"
-$outDir = Join-Path $root ("logs\p4\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
+$Phase = "p4"
+. (Join-Path $PSScriptRoot "common.ps1")
 $tmp = Join-Path $env:TEMP ("dp_p4_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Force $outDir, $tmp | Out-Null
+New-Item -ItemType Directory -Force $tmp | Out-Null
 
 Add-Type -Namespace P4 -Name N -MemberDefinition @'
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindowW(string cls, System.IntPtr title);
@@ -25,24 +20,24 @@ Add-Type -Namespace P4 -Name N -MemberDefinition @'
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
 '@
 $WM_COMMAND = 0x111; $WM_CLOSE = 0x10
-function App { [P4.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero) }
-function Chat { [P4.N]::FindWindowW("DesktopPet.Chat", [IntPtr]::Zero) }
+function App { [P4.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero) }
+function Chat { [P4.N]::FindWindowW("DesktopPetDev.Chat", [IntPtr]::Zero) }
 function AppCommand($id) { $null = [P4.N]::PostMessageW((App), $WM_COMMAND, [IntPtr]$id, [IntPtr]::Zero) }
 function ChatClick($id) { $c = Chat; $null = [P4.N]::PostMessageW($c, $WM_COMMAND, [IntPtr]$id, [P4.N]::GetDlgItem($c, $id)) }
 function ChatText($id) {
     $h = [P4.N]::GetDlgItem((Chat), $id); $n = [int][P4.N]::SendMessageW($h, 0x0E, [IntPtr]::Zero, [string]$null)
     $sb = New-Object System.Text.StringBuilder ($n + 2); $null = [P4.N]::SendMessageW($h, 0x0D, [IntPtr]($n + 1), $sb); $sb.ToString()
 }
-# 동의 창(UI-06, DesktopPet.Consent): 동의 = "이해했습니다" 체크(404) 뒤 "동의하고 켜기"(405), 거부 = 취소(IDCANCEL)
+# 동의 창(UI-06, DesktopPetDev.Consent): 동의 = "이해했습니다" 체크(404) 뒤 "동의하고 켜기"(405), 거부 = 취소(IDCANCEL)
 # -TryUnchecked: 체크 없이 동의 명령을 먼저 보내 무시되는지(창이 그대로인지) 확인한 뒤 답한다
 function AnswerConsent([bool]$agree, [switch]$TryUnchecked) {
     for ($i = 0; $i -lt 50; $i++) {
-        $d = [P4.N]::FindWindowW("DesktopPet.Consent", [IntPtr]::Zero)
+        $d = [P4.N]::FindWindowW("DesktopPetDev.Consent", [IntPtr]::Zero)
         if ($d -ne [IntPtr]::Zero) {
             if ($TryUnchecked) {
                 $null = [P4.N]::PostMessageW($d, $WM_COMMAND, [IntPtr]405, [P4.N]::GetDlgItem($d, 405))
                 Start-Sleep -Milliseconds 500
-                if ([P4.N]::FindWindowW("DesktopPet.Consent", [IntPtr]::Zero) -eq [IntPtr]::Zero) { return $false }
+                if ([P4.N]::FindWindowW("DesktopPetDev.Consent", [IntPtr]::Zero) -eq [IntPtr]::Zero) { return $false }
             }
             if ($agree) {
                 $null = [P4.N]::SendMessageW([P4.N]::GetDlgItem($d, 404), 0xF5, [IntPtr]::Zero, [string]$null)  # BM_CLICK
@@ -59,13 +54,7 @@ function AnswerConsent([bool]$agree, [switch]$TryUnchecked) {
 $ID_OBSERVE_TOGGLE = 113; $ID_OBSERVE_PAUSE_ON = 116; $ID_OBSERVE_RESUME = 117; $ID_TTS_TOGGLE = 119
 
 # ---- 모의 서버 ----
-$portFile = Join-Path $tmp "port.txt"
-$mock = Start-Process $mockExe -ArgumentList @("--port-file=$portFile") -PassThru -WindowStyle Hidden
-for ($i = 0; $i -lt 100 -and -not (Test-Path $portFile); $i++) { Start-Sleep -Milliseconds 100 }
-$base = "http://127.0.0.1:" + (Get-Content $portFile).Trim()
-function Mock($q) { $null = Invoke-RestMethod -UseBasicParsing "$base/control?$q" }
-function Stats { Invoke-RestMethod -UseBasicParsing "$base/stats" }
-function StatN($k) { $s = Stats; if ($s.PSObject.Properties[$k]) { [int]$s.$k } else { 0 } }
+Start-Mock $tmp
 
 # ---- 설정 (임시): 자리 비움 검사 끔(자동 테스트는 입력이 없음), 테스트 창을 제외 앱으로 ----
 $cfgDir = Join-Path $tmp "cfg"; New-Item -ItemType Directory -Force $cfgDir | Out-Null
@@ -80,20 +69,6 @@ $urlFile = Join-Path $tmp "authorize_url.txt"
 $dump = Join-Path $tmp "observe_dump.jpg"
 
 # ---- 로그 ----
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null; $script:mark = 0; $script:allLogs = @()
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function WaitLog($pattern, $sec = 6) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-function SinceMark($pattern) { @(PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern }) }
 # 관찰은 2초마다 계속된다: 모의 서버 모드를 바꾼 "뒤에 시작한" 요청의 결과만 본다 (Mark → start → 그 뒤 done)
 function NextObserve($sec = 12) {
     Mark
@@ -109,24 +84,15 @@ function NextObserve($sec = 12) {
     }
     return $null
 }
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = "$detail" })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 function State { if (Test-Path $stateFile) { Get-Content $stateFile -Raw | ConvertFrom-Json } else { $null } }
 
 function StartPet($pets = 1) {
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $script:petLog = $null
     $p = Start-Process $pet -ArgumentList @("--config=$cfg", "--ai", "--ai-endpoint=$base", "--ai-open-url-file=$urlFile",
         "--observe-interval-sec=2", "--observe-dump=$dump", "--no-behavior", "--pets=$pets", "--character=test-blue",
         "--spawn=1500,150", "--duration=600") -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:allLogs += $script:petLog
     $script:mark = 0
     $null = WaitLog "\[ai\] enabled endpoint=loopback-test" 8
@@ -135,17 +101,13 @@ function StartPet($pets = 1) {
 }
 # 대조 시험용: 펫 1마리, 위치·추가 인자 지정 (대화창을 열지 않음)
 function StartPet1($spawn, $extra = $null) {
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $script:petLog = $null
     $args2 = @("--config=$cfg", "--ai", "--ai-endpoint=$base", "--observe-interval-sec=2", "--observe-dump=$dump", "--no-behavior",
         "--pets=1", "--character=test-blue", $spawn, "--duration=120")
     if ($extra) { $args2 += $extra }
     $p = Start-Process $pet -ArgumentList $args2 -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:allLogs += $script:petLog
     $script:mark = 0
     $null = WaitLog "\[pet0\] event=Landed" 8
@@ -329,7 +291,7 @@ try {
             if ($n -eq 0) { return -1 } else { return $diff / $n }
         } finally { $b.Dispose() }
     }
-    function PetRect { $h = [P4.N]::FindWindowW("DesktopPet.Pet", [IntPtr]::Zero); $r = New-Object P4.N+RECT; [void][P4.N]::GetWindowRect($h, [ref]$r); $r }
+    function PetRect { $h = [P4.N]::FindWindowW("DesktopPetDev.Pet", [IntPtr]::Zero); $r = New-Object P4.N+RECT; [void][P4.N]::GetWindowRect($h, [ref]$r); $r }
     function CaptureCopy($name) {
         Mark; $c = WaitLog "\[observe\] capture ok" 8; Start-Sleep -Milliseconds 300
         $dst = Join-Path $tmp $name; Copy-Item $dump $dst -Force
@@ -404,7 +366,5 @@ finally {
     if ($mock -and -not $mock.HasExited) { Stop-Process -Id $mock.Id -Force }
     $i = 0; foreach ($l in $script:allLogs) { if ($l) { Copy-Item $l (Join-Path $outDir ("desktop-pet_{0}.log" -f $i++)) } }
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue  # 캡처 덤프(실제 화면)를 지운다
-    $results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-    $pass = @($results | Where-Object Pass).Count
-    Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+    Save-Results
 }

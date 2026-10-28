@@ -4,6 +4,7 @@
 
 #include "ui/text.h"
 #include "ui/ui_common.h"
+#include "dp_version.h"
 
 namespace dp {
 
@@ -27,7 +28,7 @@ void ConsentWindow::Ask(const std::wstring& body, Answer answer) {
     }
     body_ = body;
     answer_ = std::move(answer);
-    Open({L"DesktopPet.Consent", ui::T("observe.consent_title"), 540, 500, 0, 0, /*topmost*/ true});
+    Open({DP_CLASS_PREFIX L"Consent", ui::T("observe.consent_title"), 540, 500, 0, 0, /*topmost*/ true});
     SetFocus(Item(IDC_CONSENT_CHECK));
 }
 

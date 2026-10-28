@@ -2,16 +2,11 @@
 # 모의 SIWC 서버(127.0.0.1)만 사용. 시작 프로그램 등록은 --test-hooks 로 시험 키(HKCU\Software\DesktopPet\TestRun)만 쓴다.
 # 실행 중 설정 창·대화창이 열린다. PC를 만지지 않는다.
 param([string]$Preset = "x64-release")
-$ErrorActionPreference = "Stop"
-$env:DP_TEST_NO_WELCOME = "1"
+$Phase = "ui"
+. (Join-Path $PSScriptRoot "common.ps1")
 Remove-Item Env:DP_TEST_LANGUAGE -ErrorAction SilentlyContinue  # 이 시험은 설정 파일의 언어를 쓴다
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$bin = Join-Path $root "build\$Preset"
-$pet = Join-Path $bin "desktop-pet.exe"
-$mockExe = Join-Path $bin "mock-siwc.exe"
-$outDir = Join-Path $root ("logs\ui\" + (Get-Date -Format "yyyyMMdd_HHmmss") + "_scenarios")
 $tmp = Join-Path $env:TEMP ("dp_ui_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-New-Item -ItemType Directory -Force $outDir, $tmp | Out-Null
+New-Item -ItemType Directory -Force $tmp | Out-Null
 
 Add-Type -Namespace UIS -Name N -MemberDefinition @'
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindowW(string cls, System.IntPtr title);
@@ -27,9 +22,9 @@ Add-Type -Namespace UIS -Name N -MemberDefinition @'
 $WM_COMMAND = 0x111; $WM_CLOSE = 0x10; $WM_SETTEXT = 0x0C; $BM_CLICK = 0xF5; $BM_GETCHECK = 0xF0
 $CB_SETCURSEL = 0x14E; $LB_GETCURSEL = 0x188
 $ID_EXIT = 106; $ID_CHAT = 110; $ID_OBSERVE_SETTINGS = 120; $ID_SETTINGS = 122
-function App { [UIS.N]::FindWindowW("DesktopPet.App", [IntPtr]::Zero) }
-function Settings { [UIS.N]::FindWindowW("DesktopPet.Settings", [IntPtr]::Zero) }
-function Chat { [UIS.N]::FindWindowW("DesktopPet.Chat", [IntPtr]::Zero) }
+function App { [UIS.N]::FindWindowW("DesktopPetDev.App", [IntPtr]::Zero) }
+function Settings { [UIS.N]::FindWindowW("DesktopPetDev.Settings", [IntPtr]::Zero) }
+function Chat { [UIS.N]::FindWindowW("DesktopPetDev.Chat", [IntPtr]::Zero) }
 function AppCommand($id) { $null = [UIS.N]::PostMessageW((App), $WM_COMMAND, [IntPtr]$id, [IntPtr]::Zero) }
 function WaitWindow($fn, $sec = 5) {
     for ($i = 0; $i -lt $sec * 10; $i++) { $h = & $fn; if ($h -ne [IntPtr]::Zero) { return $h }; Start-Sleep -Milliseconds 100 }
@@ -45,14 +40,11 @@ function Pick($id, $index) { $null = [UIS.N]::SendMessageW((Ctl $id), $CB_SETCUR
 function Click($id) { $null = [UIS.N]::SendMessageW((Ctl $id), $BM_CLICK, [IntPtr]::Zero, [string]$null) }
 function Checked($id) { [int][UIS.N]::SendMessageW((Ctl $id), $BM_GETCHECK, [IntPtr]::Zero, [string]$null) -eq 1 }
 function IsWin($h) { [UIS.N]::IsWindowEnabled($h) }
-function SetCText($id, $s) { $null = [UIS.N]::SendMessageW([UIS.N]::GetDlgItem([UIS.N]::FindWindowW("DesktopPet.Characters", [IntPtr]::Zero), $id), $WM_SETTEXT, [IntPtr]::Zero, $s) }
+function SetCText($id, $s) { $null = [UIS.N]::SendMessageW([UIS.N]::GetDlgItem([UIS.N]::FindWindowW("DesktopPetDev.Characters", [IntPtr]::Zero), $id), $WM_SETTEXT, [IntPtr]::Zero, $s) }
 function Apply { $s = Settings; $null = [UIS.N]::PostMessageW($s, $WM_COMMAND, [IntPtr]502, [UIS.N]::GetDlgItem($s, 502)) }
 
 # ---- 모의 서버 ----
-$portFile = Join-Path $tmp "port.txt"
-$mock = Start-Process $mockExe -ArgumentList @("--port-file=$portFile") -PassThru -WindowStyle Hidden
-for ($i = 0; $i -lt 100 -and -not (Test-Path $portFile); $i++) { Start-Sleep -Milliseconds 100 }
-$base = "http://127.0.0.1:" + (Get-Content $portFile).Trim()
+Start-Mock $tmp
 
 # ---- 설정 (임시): 사용자가 쓴 주석과 펫 목록이 있는 파일 ----
 $cfgDir = Join-Path $tmp "cfg"; New-Item -ItemType Directory -Force $cfgDir | Out-Null
@@ -64,42 +56,20 @@ $bak = "$cfg.bak"
 # ---- 시작 프로그램: 시험 키만 쓴다. 실제 Run 키는 읽기만 해서 바뀌지 않았는지 본다 ----
 $testKey = "HKCU:\Software\DesktopPet\TestRun"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-function RunValue($key) { try { (Get-ItemProperty -Path $key -Name "DesktopPet" -ErrorAction Stop).DesktopPet } catch { $null } }
+$runName = "DesktopPet-Dev"  # 개발 빌드의 시작 프로그램 값 이름 (배포판은 "DesktopPet")
+function RunValue($key) { try { (Get-ItemProperty -Path $key -Name $runName -ErrorAction Stop).$runName } catch { $null } }
 Remove-Item $testKey -Recurse -ErrorAction SilentlyContinue
 $realBefore = RunValue $runKey
 
 # ---- 로그 ----
-$logDir = Join-Path $env:LOCALAPPDATA "DesktopPet\logs"
-$script:petLog = $null; $script:mark = 0
-function PetLines { @(Get-Content $script:petLog -Encoding UTF8) }
-function Mark { $script:mark = (PetLines).Count }
-function WaitLog($pattern, $sec = 6) {
-    $deadline = (Get-Date).AddSeconds($sec)
-    while ((Get-Date) -lt $deadline) {
-        $hit = PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern } | Select-Object -First 1
-        if ($hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-function SinceMark($pattern) { @(PetLines | Select-Object -Skip $script:mark | Where-Object { $_ -match $pattern }) }
-$results = New-Object System.Collections.ArrayList
-function Check($id, $name, $ok, $detail) {
-    [void]$results.Add([pscustomobject]@{ Id = $id; Scenario = $name; Pass = [bool]$ok; Detail = "$detail" })
-    Write-Host ("[{0}] {1} {2} — {3}" -f $id, $(if ($ok) { "PASS" } else { "FAIL" }), $name, $detail)
-}
 
 $script:allLogs = @()
 function StartApp($config) {
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    $before = LogNames
     $script:petLog = $null; $script:mark = 0
     $proc = Start-Process $pet -ArgumentList @("--config=$config", "--ai", "--ai-endpoint=$base", "--ai-open-url-file=$(Join-Path $tmp 'url.txt')",
         "--no-behavior", "--pets=1", "--character=test-blue", "--spawn=1500,150", "--duration=180", "--test-hooks") -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:allLogs += $script:petLog
     return $proc
 }
@@ -186,7 +156,7 @@ try {
     [IO.File]::WriteAllText($cfg2, "[display]`nlanguage = `"ko`"`nproximity_reaction = false`n[[pets]]`ncharacter = `"test-orange`"`ncount = 1`n")
     $userChars = Join-Path $cfg2Dir "characters"
     $hookFile = Join-Path $cfg2Dir "test_install.txt"
-    function Chars { [UIS.N]::FindWindowW("DesktopPet.Characters", [IntPtr]::Zero) }
+    function Chars { [UIS.N]::FindWindowW("DesktopPetDev.Characters", [IntPtr]::Zero) }
     function CCtl($id) { [UIS.N]::GetDlgItem((Chars), $id) }
     function CClick($id) { $c = Chars; $null = [UIS.N]::PostMessageW($c, $WM_COMMAND, [IntPtr]$id, [UIS.N]::GetDlgItem($c, $id)) }
     function ListCount { [int][UIS.N]::SendMessageW((CCtl 1001), 0x18B, [IntPtr]::Zero, [string]$null) }
@@ -241,12 +211,12 @@ try {
     $cw = WaitWindow { Chars }
     Start-Sleep -Milliseconds 500
     $n0 = if ($cw -ne [IntPtr]::Zero) { ListCount } else { 0 }
-    Check "C1" "트레이 '캐릭터 관리…' → 창, 기본 제공 3개" ($cw -ne [IntPtr]::Zero -and $n0 -eq 3 -and -not (IsWin (CCtl 1009))) "items=$n0"
+    Check "C1" "트레이 '캐릭터 관리…' → 창, 기본 제공 4개" ($cw -ne [IntPtr]::Zero -and $n0 -eq 4 -and -not (IsWin (CCtl 1009))) "items=$n0"
 
     Mark; InstallHook (Join-Path $src "folder-pkg")
     $inst = WaitLog "\[characters\] installed id=ui-test-pkg from=folder overwrite=False" 8
     Start-Sleep -Milliseconds 300
-    Check "C2" "폴더 설치 → 사용자 폴더에 id 이름으로, 목록 4개" ($inst -and (Test-Path (Join-Path $userChars "ui-test-pkg\manifest.toml")) -and (ListCount) -eq 4) "$inst"
+    Check "C2" "폴더 설치 → 사용자 폴더에 id 이름으로, 목록 5개" ($inst -and (Test-Path (Join-Path $userChars "ui-test-pkg\manifest.toml")) -and (ListCount) -eq 5) "$inst"
 
     Mark; InstallHook $goodZip
     $inst = WaitLog "\[characters\] installed id=ui-test-zip from=zip overwrite=False" 10
@@ -316,7 +286,7 @@ try {
     $cfg3Dir = Join-Path $tmp "cfg3"; New-Item -ItemType Directory -Force $cfg3Dir | Out-Null
     $cfg3 = Join-Path $cfg3Dir "config.toml"
     [IO.File]::WriteAllText($cfg3, "[display]`nlanguage = `"ko`"`nproximity_reaction = false`n")
-    function Welcome { [UIS.N]::FindWindowW("DesktopPet.Welcome", [IntPtr]::Zero) }
+    function Welcome { [UIS.N]::FindWindowW("DesktopPetDev.Welcome", [IntPtr]::Zero) }
     function WClick($id) { $w = Welcome; $null = [UIS.N]::PostMessageW($w, $WM_COMMAND, [IntPtr]$id, [UIS.N]::GetDlgItem($w, $id)) }
     Remove-Item Env:DP_TEST_NO_WELCOME
     try {
@@ -356,15 +326,11 @@ try {
         $c = Join-Path $cfgDir "config.toml"
         [IO.File]::WriteAllText($c, "[display]`nlanguage = `"ko`"`nproximity_reaction = false`n$cfgExtra")
         if ($json) { $null = Invoke-RestMethod -UseBasicParsing ("$base/control?latest=" + [uri]::EscapeDataString($json)) }
-        $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+        $before = LogNames
         $script:petLog = $null; $script:mark = 0
         $pp = Start-Process $pet -ArgumentList @("--config=$c", "--no-behavior", "--pets=1", "--character=test-blue", "--spawn=1500,150",
             "--duration=60", "--test-hooks", "--update-url=$base/$path", "--update-repo=example/desktop-pet", "--update-delay-sec=1") -PassThru
-        for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-            Start-Sleep -Milliseconds 200
-            $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-            if ($new) { $script:petLog = $new.FullName }
-        }
+        $null = Find-NewLog $before
         $script:allLogs += $script:petLog
         return [pscustomobject]@{ P = $pp; Dir = $cfgDir }
     }
@@ -375,8 +341,11 @@ try {
         '{"schema":1,"version":"' + $ver + '","published":"2026-10-20T00:00:00Z","page":"' + $page + '","zip":"DesktopPet-' + $ver + '-win-x64.zip","sha256":"' + $hash + '"}'
     }
 
+    # 현재 버전 (CMakeLists.txt project VERSION)
+    $cur = [regex]::Match((Get-Content -Raw (Join-Path $PSScriptRoot "..\..\CMakeLists.txt")), "project\(desktop_pet VERSION ([0-9.]+)").Groups[1].Value
+    $curRe = [regex]::Escape($cur)
     $r = UpdateRun "newer" (LatestJson "0.9.0")
-    $ok = WaitLog "\[update\] check ok latest=0\.9\.0 current=0\.1\.0 newer=true" 8
+    $ok = WaitLog "\[update\] check ok latest=0\.9\.0 current=$curRe newer=true" 8
     $nt = WaitLog "\[update\] notified version=0\.9\.0" 3
     AppCommand 124
     $op = WaitLog "\[update\] open page \(test: not opened\)" 3
@@ -388,8 +357,8 @@ try {
     Check "UP2" "하루 1번: 다시 시작해도 24시간 안에는 확인하지 않음" ((LatestCount) -eq $n0 -and (SinceMark "\[update\] check start").Count -eq 0) "requests=$((LatestCount) - $n0)"
     StopRun $r
 
-    $r = UpdateRun "same" (LatestJson "0.1.0")
-    $ok = WaitLog "\[update\] check ok latest=0\.1\.0 current=0\.1\.0 newer=false" 8
+    $r = UpdateRun "same" (LatestJson $cur)
+    $ok = WaitLog "\[update\] check ok latest=$curRe current=$curRe newer=false" 8
     Check "UP3" "같은 버전 → 알림 없음" ($ok -and (SinceMark "\[update\] notified").Count -eq 0) "$ok"
     StopRun $r
 
@@ -421,16 +390,12 @@ try {
     $keep = Join-Path $wDir "my-notes.txt"; [IO.File]::WriteAllText($keep, "user file")  # 앱이 만들지 않은 파일은 남아야 한다
     $wUrl = Join-Path $tmp "wipe_url.txt"
     New-Item -Path "HKCU:\Software\DesktopPet\TestRun" -Force | Out-Null
-    New-ItemProperty -Path "HKCU:\Software\DesktopPet\TestRun" -Name "DesktopPet" -Value '"x"' -Force | Out-Null
-    $before = @(Get-ChildItem $logDir -Filter *.log | Select-Object -ExpandProperty Name)
+    New-ItemProperty -Path "HKCU:\Software\DesktopPet\TestRun" -Name $runName -Value '"x"' -Force | Out-Null
+    $before = LogNames
     $script:petLog = $null; $script:mark = 0
     $wp = Start-Process $pet -ArgumentList @("--config=$wCfg", "--ai", "--ai-endpoint=$base", "--ai-open-url-file=$wUrl",
         "--no-behavior", "--pets=1", "--character=test-blue", "--spawn=1500,150", "--duration=90", "--test-hooks") -PassThru
-    for ($i = 0; $i -lt 50 -and -not $script:petLog; $i++) {
-        Start-Sleep -Milliseconds 200
-        $new = Get-ChildItem $logDir -Filter *.log | Where-Object { $before -notcontains $_.Name } | Sort-Object LastWriteTime | Select-Object -Last 1
-        if ($new) { $script:petLog = $new.FullName }
-    }
+    $null = Find-NewLog $before
     $script:allLogs += $script:petLog
     $null = Invoke-RestMethod -UseBasicParsing "$base/control?reset=1"
     $null = WaitLog "\[ai\] enabled endpoint=loopback-test" 8
@@ -450,7 +415,7 @@ try {
     $exited = $wp.WaitForExit(15000)
     $rev1 = [int](Invoke-RestMethod -UseBasicParsing "$base/stats").revoke
     $left = @(Get-ChildItem $wDir -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-    $runVal = try { (Get-ItemProperty -Path "HKCU:\Software\DesktopPet\TestRun" -Name "DesktopPet" -ErrorAction Stop).DesktopPet } catch { $null }
+    $runVal = try { (Get-ItemProperty -Path "HKCU:\Software\DesktopPet\TestRun" -Name $runName -ErrorAction Stop).$runName } catch { $null }
     $wLog = @(Get-Content $script:petLog -Encoding UTF8)
     Check "WP1" "모든 데이터 지우기: 확인 → 로그아웃(토큰 폐기 1회) → 시작 프로그램 해제 → 앱 파일 삭제 → 종료" ($si -and $authed -and $asked -and $exited -and $wp.ExitCode -eq 0 -and $rev1 -eq $rev0 + 1 -and -not $runVal -and ($wLog -match "\[wipe\] remove app data default_dir=False").Count -eq 1) "revoke=$rev0→$rev1 exit=$($wp.ExitCode)"
     Check "WP2" "앱이 만든 것만 지움 (사용자 파일은 남김)" (($left -join ",") -eq "my-notes.txt") ("left=" + ($left -join ","))
@@ -466,7 +431,5 @@ try {
     $i = 0; foreach ($l in $script:allLogs) { if ($l) { Copy-Item $l (Join-Path $outDir ("desktop-pet_{0}.log" -f $i++)) } }
     Copy-Item $cfg, $bak (Join-Path $outDir ".") -ErrorAction SilentlyContinue
 }
-$results | Export-Csv (Join-Path $outDir "results.csv") -NoTypeInformation -Encoding UTF8
-$pass = @($results | Where-Object Pass).Count
-Write-Host ("결과: {0}/{1} 통과 → {2}" -f $pass, $results.Count, $outDir)
+Save-Results
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

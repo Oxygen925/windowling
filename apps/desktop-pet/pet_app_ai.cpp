@@ -6,6 +6,7 @@
 
 #include <format>
 
+#include "ai/pet_chat.h"
 #include "diagnostics/log.h"
 #include "platform/windows/strings.h"
 #include "ui/text.h"
@@ -198,10 +199,7 @@ void PetApp::OpenChat(PetActor* pet) {
     UpdateChatAccount();
     chat_.SetBusy(activeReq_ != 0 && activePetId_ == pet->id);
     chat_.Show(true);
-    if (account_.state == AccountState::SignedIn && account_.planUsage && models_.empty() && !modelsRequested_) {
-        modelsRequested_ = true;
-        ai_.RefreshModels();
-    }
+    RequestModelsIfNeeded();
     log::Info("[ai] chat open pet={} foreground={}", pet->id, GetForegroundWindow() == chat_.Hwnd());
 }
 
@@ -218,10 +216,7 @@ void PetApp::SendChat(const std::wstring& text) {
     }
     if (modelSlug_.empty()) {
         chat_.SetStatus(ui::T("status.models_loading"));
-        if (!modelsRequested_) {
-            modelsRequested_ = true;
-            ai_.RefreshModels();
-        }
+        RequestModelsIfNeeded();
         return;
     }
     p->conv.SetMaxTurns(config_.ai.historyTurns);
@@ -233,6 +228,7 @@ void PetApp::SendChat(const std::wstring& text) {
     request.model = modelSlug_;
     request.instructions = ai::BuildInstructions(pkg.name, pkg.persona);
     request.turns = turns;
+    request.reasoningEffort = config_.ai.reasoningEffort;
     activeReq_ = ai_.Send(p->id, std::move(request), static_cast<size_t>(config_.ai.maxReplyChars),
                           StreamTimeouts{config_.ai.firstTokenTimeoutSec, config_.ai.requestTimeoutSec});
     activePetId_ = p->id;
@@ -243,6 +239,112 @@ void PetApp::SendChat(const std::wstring& text) {
     chat_.SetBusy(true);
     chat_.SetStatus(ui::T("status.receiving"));
     log::Info("[ai] send pet={} request={} turns={} chars={}", p->id, activeReq_, turns.size(), ai::Utf8Length(utf8));
+}
+
+// ---- 모델 목록 ----
+
+bool PetApp::RequestModelsIfNeeded() {
+    if (!aiEnabled_ || modelsRequested_ || !models_.empty() || account_.state != AccountState::SignedIn || !account_.planUsage)
+        return false;
+    modelsRequested_ = true;
+    ai_.RefreshModels();
+    return true;
+}
+
+int PetApp::SelectDefaultModel() {
+    int sel = models_.empty() ? -1 : 0;
+    for (size_t i = 0; i < models_.size(); ++i)
+        if (models_[i].slug == config_.ai.model) sel = static_cast<int>(i);
+    modelSlug_ = sel >= 0 ? models_[sel].slug : "";
+    chat_.SetModels(models_, sel);
+    return sel;
+}
+
+// ---- 펫끼리 AI 대화 ----
+
+uint64_t PetApp::SendPetChatLine(PetActor& speaker, const PetActor& other, const std::string& otherLine,
+                                 ai::PetChatSituation situation) {
+    const char* lang = ui::CurrentLanguage() == "ko" ? "Korean" : "English";
+    auto request = ai::BuildPetChatRequest(modelSlug_, speaker.asset->pkg.name, speaker.asset->pkg.persona, other.asset->pkg.name,
+                                           otherLine, lang, situation);
+    request.reasoningEffort = config_.ai.petChatEffort;
+    const StreamTimeouts timeouts{std::min(config_.ai.firstTokenTimeoutSec, 30), std::min(config_.ai.requestTimeoutSec, 60)};
+    if (!speaker.bubble) speaker.bubble = std::make_unique<SpeechBubble>();
+    speaker.bubble->SetText(L"…");
+    speaker.bubble->hideAt = 0;
+    return ai_.Send(speaker.id, std::move(request), ai::kPetChatChars * 2, timeouts);
+}
+
+const char* PetApp::PetChatBlock(double now) {
+    if (!config_.ai.petChat) return "off";
+    if (!aiEnabled_) return "ai_off";
+    if (account_.state != AccountState::SignedIn) return "signed_out";
+    if (!account_.planUsage) return "plan_usage";
+    if (modelSlug_.empty()) {  // 모델 목록이 아직 없으면 받아 두고 이번 인사는 고정 문구
+        RequestModelsIfNeeded();
+        return "models_loading";
+    }
+    // 사용자 대화·관찰 중이거나 대화창이 열려 있으면 양보 (단일 요청 슬롯을 빼앗지 않는다)
+    if (activeReq_ || observeReq_) return "busy";
+    if (petChat_.req) return "pet_chat_running";
+    if (chat_.Visible()) return "chat_window_open";
+    if (now - lastPetChatAt_ < config_.ai.petChatIntervalMin * 60.0) return "interval";
+    return nullptr;
+}
+
+bool PetApp::TryPetChat(PetActor& a, PetActor& b, double now, ai::PetChatSituation situation) {
+    const char* block = PetChatBlock(now);
+    if (!block) {
+        StartPetChat(a, b, now, situation);
+        return true;
+    }
+    if (config_.ai.petChat) log::Info("[pet-chat] skip reason={} next_in={:.0f}s", block,
+                                      std::max(0.0, lastPetChatAt_ + config_.ai.petChatIntervalMin * 60.0 - now));
+    return false;
+}
+
+void PetApp::StartPetChat(PetActor& a, PetActor& b, double now, ai::PetChatSituation situation) {
+    petChat_ = {SendPetChatLine(a, b, "", situation), a.id, b.id, 1, {}};
+    lastPetChatAt_ = now;
+    // 마주 보고 이야기 (대화가 끝나면 EndPetChat 이 줄인다). 페어 프로그래밍은 지금 행동(들여다보기·코딩) 그대로
+    if (situation != ai::PetChatSituation::PeekCode)
+        for (PetActor* x : {&a, &b}) x->fsm->Force({"greet", 30.0, 0}, now);
+    log::Info("[pet-chat] start a=pet{} b=pet{} request={} situation={} effort={}", a.id, b.id, petChat_.req, static_cast<int>(situation),
+              config_.ai.petChatEffort.empty() ? "default" : config_.ai.petChatEffort);
+}
+
+void PetApp::OnPetChatDone(const AiEvent& e, double now) {
+    const int stage = petChat_.stage;
+    const std::string line = ai::QuoteForPrompt(petChat_.reply, ai::kPetChatChars);
+    log::Info("[pet-chat] done stage={} request={} outcome={} chars={} http={} code={}", stage, e.requestId,
+              ToString(e.stream.outcome), ai::Utf8Length(line), e.stream.http, e.stream.code);  // 대화 내용은 남기지 않는다
+    PetActor* speaker = PetById(stage == 1 ? petChat_.a : petChat_.b);
+    if (speaker && speaker->bubble && !speaker->speaking) {  // 사용자 대화가 끼어들었으면 그 말풍선은 건드리지 않는다
+        if (line.empty()) speaker->bubble->Hide();
+        else {
+            speaker->bubble->SetText(ToWide(line));
+            speaker->bubble->hideAt = now + 6.0;
+        }
+    }
+    petChat_.req = 0;
+    PetActor* a = PetById(petChat_.a);
+    PetActor* b = PetById(petChat_.b);
+    if (stage == 1 && !line.empty() && a && b && !b->speaking && !activeReq_ && !observeReq_ &&
+        account_.state == AccountState::SignedIn) {
+        // b 가 a 의 말에 답한다 (a 의 말은 따옴표 데이터로)
+        petChat_.req = SendPetChatLine(*b, *a, line, ai::PetChatSituation::Met);
+        petChat_.stage = 2;
+        petChat_.reply.clear();
+        return;
+    }
+    EndPetChat(now);
+}
+
+void PetApp::EndPetChat(double now) {
+    for (int id : {petChat_.a, petChat_.b})
+        if (PetActor* x = PetById(id); x && x->fsm->Activity() == "greet")
+            x->fsm->Force({"greet", 3.0, 0}, now);  // 마지막 말풍선을 읽을 시간, 그 뒤 다음 행동
+    petChat_ = {};
 }
 
 void PetApp::StopChat() {
@@ -259,6 +361,7 @@ void PetApp::OnAiEvent(std::unique_ptr<AiEvent> e) {
         case AiEvent::Kind::Account:
             account_ = e->account;
             UpdateChatAccount();
+            if (config_.ai.petChat) RequestModelsIfNeeded();  // 펫끼리 대화를 켰으면 첫 만남부터 쓸 수 있게 목록을 미리
             break;
         case AiEvent::Kind::SignInDone:
             signingIn_ = false;
@@ -284,17 +387,20 @@ void PetApp::OnAiEvent(std::unique_ptr<AiEvent> e) {
                 break;
             }
             models_ = e->models;
-            int sel = models_.empty() ? -1 : 0;
-            for (size_t i = 0; i < models_.size(); ++i)
-                if (models_[i].slug == config_.ai.model) sel = static_cast<int>(i);
-            modelSlug_ = sel >= 0 ? models_[sel].slug : "";
-            chat_.SetModels(models_, sel);
+            const int sel = SelectDefaultModel();
+            settings_.ModelsChanged();
             if (models_.empty()) chat_.SetStatus(ui::T("status.no_models"));
             else chat_.SetStatus(L"");
             log::Info("[ai] ui models count={} selected={}", models_.size(), sel);
             break;
         }
         case AiEvent::Kind::Delta: {
+            if (petChat_.req && e->requestId == petChat_.req) {  // 펫끼리 대화: 말풍선만 (이력·대화창·TTS 없음)
+                petChat_.reply += e->text;
+                if (PetActor* s = PetById(petChat_.stage == 1 ? petChat_.a : petChat_.b); s && s->bubble && !s->speaking)
+                    s->bubble->SetText(ToWide(ai::Utf8Tail(ai::QuoteForPrompt(petChat_.reply, ai::kPetChatChars), kBubbleChars)));
+                break;
+            }
             if (e->requestId != activeReq_) break;
             PetActor* p = PetById(e->petId);
             if (!p) break;
@@ -304,7 +410,14 @@ void PetApp::OnAiEvent(std::unique_ptr<AiEvent> e) {
             break;
         }
         case AiEvent::Kind::StreamDone: {
+            if (petChat_.req && e->requestId == petChat_.req) {
+                account_ = e->account;
+                if (e->effortRejected) log::Info("[pet-chat] effort={} rejected by model → sent without effort", config_.ai.petChatEffort);
+                OnPetChatDone(*e, now);
+                break;
+            }
             if (e->requestId != activeReq_) break;
+            if (e->effortRejected) log::Info("[ai] effort={} rejected by model → sent without effort", config_.ai.reasoningEffort);
             activeReq_ = 0;
             activePetId_ = -1;
             const auto& r = e->stream;

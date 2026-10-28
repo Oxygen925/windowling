@@ -9,8 +9,10 @@ namespace dp::ai {
 
 std::vector<std::string> WiderScope(const ObserveScope& c, const ObserveScope& n) {
     std::vector<std::string> out;
-    if (n.maxPerHour > c.maxPerHour) out.emplace_back("observe.max_per_hour");
-    if (n.maxPerDay > c.maxPerDay) out.emplace_back("observe.max_per_day");
+    // 상한은 0 = 무제한 = 가장 넓다
+    auto widerLimit = [](int consented, int now) { return consented != 0 && (now == 0 || now > consented); };
+    if (widerLimit(c.maxPerHour, n.maxPerHour)) out.emplace_back("observe.max_per_hour");
+    if (widerLimit(c.maxPerDay, n.maxPerDay)) out.emplace_back("observe.max_per_day");
     if (n.intervalMinMin < c.intervalMinMin) out.emplace_back("observe.interval_min");
     if (n.intervalMaxMin < c.intervalMaxMin) out.emplace_back("observe.interval_max");
     // 값이 클수록 오래 자리를 비워도 관찰한다. 0 은 검사하지 않음 = 가장 넓다
@@ -63,8 +65,8 @@ const char* EvaluateGuard(const GuardInput& in, const ObserveCounter& counter, c
     if (in.excludedAppVisible) return "excluded_app";
     if (lim.requireActivitySec > 0 && in.idleSec > lim.requireActivitySec) return "idle";
     if (in.chatBusy) return "chat_busy";
-    if (counter.SentWithin(now, 3600.0) >= lim.perHour) return "hourly_limit";
-    if (counter.SentWithin(now, 86400.0) >= lim.perDay) return "daily_limit";
+    if (lim.perHour > 0 && counter.SentWithin(now, 3600.0) >= lim.perHour) return "hourly_limit";  // 0 = 무제한
+    if (lim.perDay > 0 && counter.SentWithin(now, 86400.0) >= lim.perDay) return "daily_limit";
     return nullptr;
 }
 

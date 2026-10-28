@@ -1,6 +1,8 @@
 // P4 화면 관찰: Privacy Guard·스케줄·관찰 요청·응답 검증·설정 (Windows 비의존 부분)
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 #include <nlohmann/json.hpp>
 
 #include "ai/observe.h"
@@ -248,4 +250,38 @@ TEST_CASE("Persona is fenced as untrusted and rules are restated after it", "[ob
     CHECK(reminder > close);
     CHECK(s.find("personal or sensitive", reminder) != std::string::npos);
     CHECK(BuildInstructions("Orange", "").find("<persona>") == std::string::npos);
+}
+
+TEST_CASE("Observe limits: 0 = unlimited, 1-minute interval", "[observe][config]") {
+    // 설정: 상한 0 허용, 간격 최소 1분
+    auto r = core::ParseConfig("[observe]\ninterval_min = 1\ninterval_max = 1\nmax_per_hour = 0\nmax_per_day = 0\n");
+    CHECK(r.warnings.empty());
+    CHECK(r.config.observe.intervalMinMin == 1);
+    CHECK(r.config.observe.maxPerHour == 0);
+    CHECK(r.config.observe.maxPerDay == 0);
+    auto bad = core::ParseConfig("[observe]\nmax_per_hour = -1\ninterval_min = 0\nmax_per_day = 5000\n");
+    CHECK(bad.config.observe.maxPerHour == 2);
+    CHECK(bad.config.observe.intervalMinMin == 15);
+    CHECK(bad.config.observe.maxPerDay == 16);
+    CHECK(bad.warnings.size() >= 3);
+    CHECK(core::ParseConfig(core::SerializeConfig(r.config)).config.observe == r.config.observe);
+
+    // 가드: 0 이면 상한 검사를 하지 않는다
+    ObserveCounter c;
+    for (int i = 0; i < 100; ++i) c.RecordSent(i * 60.0);
+    CHECK(EvaluateGuard(Allowed(), c, GuardLimits{0, 0, 0}, 6000) == nullptr);
+    CHECK(std::string(EvaluateGuard(Allowed(), c, GuardLimits{0, 50, 0}, 6000)) == "daily_limit");
+    CHECK(std::string(EvaluateGuard(Allowed(), c, GuardLimits{10, 0, 0}, 6000)) == "hourly_limit");
+
+    // 범위: 제한 → 무제한은 넓어짐 (재동의), 무제한에 동의했으면 어떤 값도 넓어지지 않음
+    ObserveScope limited;
+    ObserveScope unlimited;
+    unlimited.maxPerHour = unlimited.maxPerDay = 0;
+    const auto w = WiderScope(limited, unlimited);
+    CHECK(std::find(w.begin(), w.end(), "observe.max_per_hour") != w.end());
+    CHECK(std::find(w.begin(), w.end(), "observe.max_per_day") != w.end());
+    CHECK(WiderScope(unlimited, limited).empty());
+    ObserveScope more = limited;
+    more.maxPerHour = 30;
+    CHECK(WiderScope(unlimited, more).empty());
 }

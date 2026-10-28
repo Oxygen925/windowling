@@ -18,6 +18,7 @@
 #include "platform/windows/strings.h"
 #include "ui/text.h"
 #include "ai/json_util.h"
+#include "dp_version.h"
 
 namespace dp {
 
@@ -185,7 +186,7 @@ void PetApp::SaveObserveState() {
 void PetApp::UpdateObserveIndicators() {
     const double now = Now();
     const bool paused = observePausedUntil_ < 0 || observePausedUntil_ > now;
-    tray_.SetTip((observeReq_ ? ui::T("tray.tip_observing") : ui::T("tray.tip")).c_str());
+    tray_.SetTip(((observeReq_ ? ui::T("tray.tip_observing") : ui::T("tray.tip")) + DP_CHANNEL_SUFFIX).c_str());
     chat_.SetObserveNote(!observeOn_ ? L"" : paused ? ui::T("chat.observe_paused") : ui::T("chat.observe_on"));
 }
 
@@ -272,7 +273,7 @@ void PetApp::ObserveTick(double now) {
     PetActor* pet = nullptr;
     std::vector<PetActor*> candidates;
     for (auto& p : pets_)
-        if (p->hwnd && !p->hiddenFullscreen) candidates.push_back(p.get());
+        if (p->hwnd && !p->hiddenFullscreen && !p->isBug) candidates.push_back(p.get());
     if (candidates.size() > 1)  // 같은 펫이 연달아 말하지 않게
         std::erase_if(candidates, [this](PetActor* p) { return p->id == lastObservePet_; });
     if (!candidates.empty()) {
@@ -303,10 +304,7 @@ void PetApp::ObserveTick(double now) {
     if (!skip && pets_.empty()) skip = "no_pet";
     if (!skip && modelSlug_.empty()) {
         skip = "no_model";
-        if (!modelsRequested_) {
-            modelsRequested_ = true;
-            ai_.RefreshModels();
-        }
+        RequestModelsIfNeeded();
     }
     if (skip) {
         lastObserveSkip_ = skip;
@@ -365,6 +363,7 @@ void PetApp::ObserveTick(double now) {
     job.behaviors = ObserveBehaviors(*pet);
     job.maxSpeechChars = static_cast<size_t>(config_.observe.maxSpeechChars);
     job.model = modelSlug_;
+    job.reasoningEffort = config_.ai.reasoningEffort;
     job.instructions = ai::BuildObserveInstructions(pkg.name, pkg.persona, job.maxSpeechChars, job.behaviors);
     job.context.appName = config_.observe.sendAppName ? ForegroundExeOn(mon) : "";
     job.context.localTime = LocalTimeHHMM();
@@ -475,7 +474,8 @@ void PetApp::ToggleObserve() {
     for (const auto& x : o.excludeExe) excluded += (excluded.empty() ? L"" : L", ") + ToWide(x);
     const std::wstring body =
         ui::TF("observe.consent_body", o.imageMaxPx, o.sendAppName ? ui::T("observe.consent_app_name") : std::wstring(),
-               o.intervalMinMin, o.intervalMaxMin, o.maxPerHour, o.maxPerDay, o.requireActivityMin,
+               o.intervalMinMin, o.intervalMaxMin, LimitText(o.maxPerHour), LimitText(o.maxPerDay),
+               o.requireActivityMin > 0 ? ui::TF("observe.away_min", o.requireActivityMin) : ui::T("observe.away_off"),
                excluded.empty() ? ui::T("observe.consent_no_excluded") : excluded);
     pendingScope_ = ScopeOfConfig();  // 동의 창에 보인 값
     consent_.Ask(body, [this](bool agreed) { OnObserveConsent(agreed); });
@@ -510,6 +510,9 @@ void PetApp::PauseObserve(double untilSec, const char* reason) {
     ScheduleObserveDeadlineOnly(Now());
 }
 
+// 관찰 상한 표시: "최대 N회" 또는 "무제한" (0)
+std::wstring PetApp::LimitText(int limit) { return limit > 0 ? ui::TF("observe.limit_n", limit) : ui::T("observe.limit_none"); }
+
 void PetApp::ShowObserveStatus() {
     const double now = Now();
     const bool paused = observePausedUntil_ < 0 || observePausedUntil_ > now;
@@ -520,7 +523,8 @@ void PetApp::ShowObserveStatus() {
         "observe.status_body", observeOn_ ? ui::T("observe.on") : ui::T("observe.off"),
         paused ? ui::T("observe.paused_suffix") : std::wstring(),
         observeConsent_ ? ui::TF("observe.consent_version", observeConsent_, ToWide(observeConsentAt_)) : ui::T("observe.consent_none"),
-        observeCounter_.SentWithin(now, 3600), observeCounter_.SentWithin(now, 86400), next,
+        observeCounter_.SentWithin(now, 3600), LimitText(config_.observe.maxPerHour), observeCounter_.SentWithin(now, 86400),
+        LimitText(config_.observe.maxPerDay), next,
         lastObserveSkip_.empty() ? std::wstring(L"-") : ToWide(lastObserveSkip_), ttsOn_ ? ui::T("observe.on") : ui::T("observe.off"));
     MessageBoxW(appWnd_.get(), text.c_str(), ui::T("observe.status_title").c_str(), MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
 }

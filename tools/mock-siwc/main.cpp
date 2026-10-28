@@ -243,6 +243,15 @@ void Responses(SOCKET s, const net::MiniRequest& r) {
                         }
                     }
         const bool hasFormat = b.is_object() && b.contains("text") && b["text"].is_object() && b["text"].contains("format");
+        // reasoning.effort (2026-10-21): 받은 값을 기록하고, reasoning=reject 면 400 (모델이 그 effort 를 받지 않는 경우 흉내)
+        const std::string effort = b.is_object() && b.contains("reasoning") && b["reasoning"].is_object()
+                                       ? b["reasoning"].value("effort", "") : "";
+        if (!effort.empty()) g.Count("with_effort");
+        if (!effort.empty() && g.Mode("reasoning", "ok") == "reject") {
+            g.Count("effort_rejected");
+            Send(s, 400, {{"error", {{"code", "unsupported_value"}, {"param", "reasoning.effort"}}}});
+            return;
+        }
         g.stats["last_responses"] = {{"store", b.is_object() && b.contains("store") ? b["store"] : json()},
                                      {"stream", b.is_object() && b.contains("stream") ? b["stream"] : json()},
                                      {"model", b.is_object() ? b.value("model", "") : ""},
@@ -254,6 +263,7 @@ void Responses(SOCKET s, const net::MiniRequest& r) {
                                      {"image_chars", imageChars},
                                      {"image_detail", detail},
                                      {"has_text_format", hasFormat},
+                                     {"effort", effort},
                                      {"has_app_name", appName}};
         if (hasImage) {
             g.Count("observe");

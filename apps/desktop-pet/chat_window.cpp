@@ -7,11 +7,12 @@
 #include "platform/windows/strings.h"
 #include "ui/text.h"
 #include "ui/ui_common.h"
+#include "dp_version.h"
 
 namespace dp {
 
 namespace {
-constexpr wchar_t kChatClass[] = L"DesktopPet.Chat";
+constexpr wchar_t kChatClass[] = DP_CLASS_PREFIX L"Chat";
 }
 
 bool ChatWindow::Create(HINSTANCE instance, ChatCallbacks callbacks) {

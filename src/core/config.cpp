@@ -1,9 +1,11 @@
 #include "core/config.h"
+#include "core/reasoning_effort.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <set>
+#include <tuple>
 #include <sstream>
 
 #include <toml++/toml.hpp>
@@ -68,7 +70,8 @@ const std::set<std::string> kKnownKeys = {
     "physics.hz", "physics.gravity", "physics.walk_speed", "world.foot_support_ratio", "world.occlusion_grace_ms",
     "world.resync_interval_sec", "world.excluded_surface_exe", "fullscreen.coverage", "fullscreen.always_show_exe",
     "fullscreen.always_hide_exe", "ai.enabled", "ai.hotkey", "ai.model", "ai.history_turns", "ai.max_reply_chars",
-    "ai.bubble_seconds", "ai.first_token_timeout_sec", "ai.request_timeout_sec", "ai.callback_port",
+    "ai.bubble_seconds", "ai.first_token_timeout_sec", "ai.request_timeout_sec", "ai.callback_port", "ai.pet_chat",
+    "ai.pet_chat_interval_min", "ai.reasoning_effort", "ai.pet_chat_effort",
     "observe.interval_min", "observe.interval_max", "observe.max_per_hour", "observe.max_per_day",
     "observe.require_activity_min", "observe.send_app_name", "observe.image_max_px", "observe.jpeg_quality",
     "observe.max_speech_chars", "observe.exclude_exe", "observe.allowed_behaviors", "tts.enabled", "tts.engine", "tts.voice", "tts.rate",
@@ -150,6 +153,18 @@ ConfigLoadResult ParseConfig(const std::string& tomlText) {
         c.ai.requestTimeoutSec = c.ai.firstTokenTimeoutSec;
     }
     ReadNumber(t, "ai", "callback_port", c.ai.callbackPort, 1024, 65535, w);
+    ReadString(t, "ai", "reasoning_effort", c.ai.reasoningEffort, w);
+    ReadString(t, "ai", "pet_chat_effort", c.ai.petChatEffort, w);
+    for (auto [key, val, def] : {std::tuple{"ai.reasoning_effort", &c.ai.reasoningEffort, AiConfig{}.reasoningEffort},
+                                 std::tuple{"ai.pet_chat_effort", &c.ai.petChatEffort, AiConfig{}.petChatEffort}}) {
+        if (*val == "default") val->clear();
+        if (!IsReasoningEffort(*val)) {
+            w.push_back(std::string(key) + " 은 default·none·minimal·low·medium·high·xhigh 중 하나 — 기본값 사용");
+            *val = def;
+        }
+    }
+    ReadBool(t, "ai", "pet_chat", c.ai.petChat, w);
+    ReadNumber(t, "ai", "pet_chat_interval_min", c.ai.petChatIntervalMin, 1, 240, w);
 
     // [observe]·[tts] (P4)
     auto& o = c.observe;
@@ -159,8 +174,8 @@ ConfigLoadResult ParseConfig(const std::string& tomlText) {
         w.push_back("observe.interval_max 가 interval_min 보다 작아 같은 값으로 맞춤");
         o.intervalMaxMin = o.intervalMinMin;
     }
-    ReadNumber(t, "observe", "max_per_hour", o.maxPerHour, 1, 60, w);
-    ReadNumber(t, "observe", "max_per_day", o.maxPerDay, 1, 500, w);
+    ReadNumber(t, "observe", "max_per_hour", o.maxPerHour, 0, 60, w);    // 0 = 무제한 (간격이 최소 1분이라 시간당 60회가 실제 상한)
+    ReadNumber(t, "observe", "max_per_day", o.maxPerDay, 0, 1440, w);    // 0 = 무제한
     ReadNumber(t, "observe", "require_activity_min", o.requireActivityMin, 0, 24 * 60, w);
     ReadBool(t, "observe", "send_app_name", o.sendAppName, w);
     ReadNumber(t, "observe", "image_max_px", o.imageMaxPx, 256, 2048, w);
@@ -278,7 +293,11 @@ std::string SerializeConfig(const Config& c) {
                            {"bubble_seconds", c.ai.bubbleSeconds},
                            {"first_token_timeout_sec", c.ai.firstTokenTimeoutSec},
                            {"request_timeout_sec", c.ai.requestTimeoutSec},
-                           {"callback_port", c.ai.callbackPort}}},
+                           {"callback_port", c.ai.callbackPort},
+                           {"reasoning_effort", c.ai.reasoningEffort.empty() ? std::string("default") : c.ai.reasoningEffort},
+                           {"pet_chat", c.ai.petChat},
+                           {"pet_chat_effort", c.ai.petChatEffort.empty() ? std::string("default") : c.ai.petChatEffort},
+                           {"pet_chat_interval_min", c.ai.petChatIntervalMin}}},
         {"observe", toml::table{{"interval_min", c.observe.intervalMinMin},
                                 {"interval_max", c.observe.intervalMaxMin},
                                 {"max_per_hour", c.observe.maxPerHour},
@@ -409,6 +428,11 @@ std::optional<Hotkey> ParseHotkey(std::string_view text) {
     X("ai.bubble_seconds", ai.bubbleSeconds) \
     X("ai.first_token_timeout_sec", ai.firstTokenTimeoutSec) \
     X("ai.request_timeout_sec", ai.requestTimeoutSec) \
+    X("ai.model", ai.model) \
+    X("ai.reasoning_effort", ai.reasoningEffort) \
+    X("ai.pet_chat_effort", ai.petChatEffort) \
+    X("ai.pet_chat", ai.petChat) \
+    X("ai.pet_chat_interval_min", ai.petChatIntervalMin) \
     X("observe.interval_min", observe.intervalMinMin) \
     X("observe.interval_max", observe.intervalMaxMin) \
     X("observe.max_per_hour", observe.maxPerHour) \

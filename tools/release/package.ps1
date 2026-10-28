@@ -21,6 +21,8 @@ if (-not (Test-Path $verHeader)) { throw "빌드 결과가 없음: $verHeader (t
 $m = Select-String -Path $verHeader -Pattern '#define DP_VERSION_STRING "([0-9]+\.[0-9]+\.[0-9]+)"'
 if (-not $m) { throw "버전을 읽지 못함" }
 $version = $m.Matches[0].Groups[1].Value
+# 배포판은 release 채널이어야 한다 (개발 채널은 DesktopPet-Dev 데이터 폴더를 쓴다)
+if (-not (Select-String -Path $verHeader -Pattern '^#define DP_DEV_CHANNEL 0' -Quiet)) { throw "개발 채널 빌드 — 배포 패키지는 DP_DEV_CHANNEL=OFF (x64-dist) 로" }
 $name = "DesktopPet-$version-win-x64"
 
 # ---- 넣을 파일 ----
